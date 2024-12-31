@@ -49,11 +49,11 @@ class Client(discord.Client):
 
 					async with SerialGuard(msg):
 						content = " ".join(args)
-						resp = await serialClient.send_raw(content.encode("ascii"))
-						await msg.reply(f"```{resp.decode("ascii").strip()}```")
+						resp = await serialClient.send_raw(content)
+						await msg.reply(f"```{resp.strip()}```")
 				case "$status":
 					async with SerialGuard(msg):
-						body = (await serialClient.send_raw(b"STS")).decode("ascii")
+						body = (await serialClient.send_raw(b"STS"))
 						(_, l1, l2, l3, l4, *_) = body.split(",")
 						l1 = l1.strip()
 						l2 = l2.strip()
@@ -85,13 +85,13 @@ class Client(discord.Client):
 							await serialClient.send_keys(b"M>>>>>^")
 						else:
 							await serialClient.send_keys(b"M>>^^")
-							await serialClient.send_keys(options[option].encode("ASCII"))
+							await serialClient.send_keys(options[option])
 						await serialClient.send_key(ord('^'))
 				case "$freqrange":
 					async with SerialGuard(msg):
 						[minfreq, maxfreq] = args
 						await serialClient.send_raw(b"EPG")
-						await serialClient.send_keys(f"M>>^>>^^>^...{minfreq}E...{maxfreq}EMM<^".encode("ascii"))
+						await serialClient.send_keys(f"M>>^>>^^>^...{minfreq}E...{maxfreq}EMM<^")
 				case "$freq" | "$freqs":
 					async with SerialGuard(msg):
 						status = await msg.reply(f"0/{len(args)} frequencies processed")
@@ -100,9 +100,9 @@ class Client(discord.Client):
 							try:
 								await serialClient.send_raw(b"EPG")
 								await serialClient.send_raw(b"QSH,0,0,AUTO,0,2,0,1,0,0")
-								await serialClient.send_keys(f"{freq}E".encode("ascii"))
+								await serialClient.send_keys(f"{freq}E")
 
-								[_, sline, *_] = (await serialClient.send_raw(b"STS")).decode("ascii").split(",")
+								[_, sline, *_] = (await serialClient.send_raw(b"STS")).split(",")
 								if "out of band" in sline.lower():
 									notes.append(f"{freq}: out of band")
 									await serialClient.send_raw(b"EPG")
@@ -110,7 +110,7 @@ class Client(discord.Client):
 
 								await serialClient.send_key(ord('E'))
 
-								[_, sline, *_] = (await serialClient.send_raw(b"STS")).decode("ascii").split(",")
+								[_, sline, *_] = (await serialClient.send_raw(b"STS")).split(",")
 								if "frequency exists" in sline.lower():
 									notes.append(f"{freq}: already exists")
 
@@ -141,10 +141,10 @@ class Client(discord.Client):
 							await serialClient.send_raw(b"EPG")
 							await serialClient.send_raw(b"PRG")
 
-							numSystems = int((await serialClient.send_raw(b"SCT")).decode().split(",")[1])
+							numSystems = int((await serialClient.send_raw(b"SCT")).split(",")[1])
 							print(f"{numSystems=}")
-							head = int((await serialClient.send_raw(b"SIH")).decode().split(",")[1])
-							tail = int((await serialClient.send_raw(b"SIT")).decode().split(",")[1])
+							head = int((await serialClient.send_raw(b"SIH")).split(",")[1])
+							tail = int((await serialClient.send_raw(b"SIT")).split(",")[1])
 							ids = []
 							match numSystems:
 								case 0:
@@ -163,7 +163,7 @@ class Client(discord.Client):
 
 							systems = []
 							for id in ids:
-								match (await serialClient.send_raw(f"SIN,{id}".encode("ascii"))).decode("ascii").split(","):
+								match (await serialClient.send_raw(f"SIN,{id}")).split(","):
 									case ["SIN", _, name, *_]:
 										systems.append(f"* {id} - {name}")
 									case ["ERR", *_]:
@@ -184,7 +184,7 @@ class Client(discord.Client):
 							await msg.reply(f"unknown command `{cmd}`")
 							return
 
-						await serialClient.send_keys(msg.content.encode("ascii").upper())
+						await serialClient.send_keys(msg.content.upper())
 
 						""" unknown = set()
 						for key in msg.content:
@@ -270,14 +270,20 @@ class SerialProtocol:
 			if len(line) == 0:
 				break
 
-		return self.read_line()
+	async def send_raw(self, line: str):
+		def inner():
+			nonlocal line
+			if type(line) is str:
+				line = line.encode("ascii")
+			self.write_line(line)
+			return self.read_line().decode("ascii")
+		return await asyncio.to_thread(inner)
 
-	async def send_raw(self, line: bytes):
-		return await asyncio.to_thread(self.write_line, line)
-
-	async def send_key(self, key: int, mode = "P"):
+	async def send_key(self, key: int | str, mode = "P"):
+		if type(key) is str:
+			key = ord(key)
 		assert key in self.allowedKeys, f"{chr(key)!r} is not a valid key"
-		await self.send_raw(f"KEY,{chr(key)},{mode}".encode("ascii"))
+		await self.send_raw(f"KEY,{chr(key)},{mode}")
 
 	async def send_keys(self, keys: bytes):
 		for key in keys:
