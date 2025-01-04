@@ -1,8 +1,8 @@
-## Manual
+### Manual
 https://www.uniden.info/download/ompdf/SC230om.pdf
 
-## Protocol docs
+### Protocol docs
 https://www.uniden.info/download/files/SC230_Protocol.pdf
 
-## Regional frequencies database
+### Regional frequencies database
 https://www.radioreference.com/db/browse/ctid/189

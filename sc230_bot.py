@@ -106,12 +106,12 @@ class Client(discord.Client):
 					[minfreq, maxfreq] = args
 					minfreq = serialClient.format_frequency(minfreq)
 					maxfreq = serialClient.format_frequency(maxfreq)
-					username = f"$fr:{msg.author.display_name.replace(",", "")[:16]}"
+					username = f"$r:{msg.author.display_name.replace(",", "")[:16]}"
 					async with SerialGuard(msg):
 						async with ProgramGuard():
 							await serialClient.send_raw(f"CSG,{"1" * 9}0")
 							await serialClient.send_raw(f"CSP,0,{username},{minfreq},{maxfreq},0,AUTO,0,2,0")
-						await serialClient.send_keys(b"M>>^>^")
+						await serialClient.send_keys(b"F+S.>E")
 				case "$memclear":
 					raise CommandError("fixme")
 					async with SerialGuard(msg):
