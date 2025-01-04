@@ -63,6 +63,8 @@
   * `$rawon`/`$rawoff` like keycode commands treats all messages as protocol data
 * `$hardclear`
   * admin only. factory reset
+* `$restart`
+  * admin only. restarts bot
 
 Keycodes:
 ```

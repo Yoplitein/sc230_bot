@@ -20,6 +20,18 @@ class Client(discord.Client):
 
 	async def on_ready(self):
 		logger.info("ready")
+		for channel in config["control_channels"]:
+			channel = self.get_channel(channel)
+			await channel.send("scanner control bot ready", delete_after=5.0)
+
+		if "--auto-restart" in sys.argv:
+			from inotify_simple import INotify, flags
+			inotify = INotify()
+			inotify.add_watch(__file__, flags.CLOSE_WRITE)
+			def on_readable(*args, **kwargs):
+				logger.info(f"{os.path.basename(__file__)} modified, restarting")
+				os.execvp(sys.orig_argv[0], sys.orig_argv)
+			self.loop.add_reader(inotify, on_readable)
 
 	async def on_message(self, msg: discord.Message):
 		if msg.author == self.user or msg.channel.id not in config["control_channels"]:
@@ -444,6 +456,11 @@ class Client(discord.Client):
 					enforce_is_admin(msg.author)
 					async with SerialGuard(msg), ProgramGuard():
 						await serialClient.send_raw(b"CLR")
+				case "$restart":
+					enforce_is_admin(msg.author)
+					[cmd, *args] = sys.argv
+					await msg.reply("restarting")
+					os.execvp(sys.orig_argv[0], sys.orig_argv)
 				case _:
 					if msg.author.id in self.rawInputUsers:
 						await self.send_raw(msg, msg.content.split("\n"))
@@ -461,7 +478,8 @@ class Client(discord.Client):
 			await msg.add_reaction("\N{CROSS MARK}")
 			raise err
 
-	async def on_error(self, event, msg, *args, **kwargs):
+	async def on_error(self, event, msg = None, *args, **kwargs):
+		logger.debug(f"on_error {event=} {msg=} {args=} {kwargs=}")
 		(ty, err, _) = sys.exc_info()
 		match err:
 			case CommandError():
@@ -471,7 +489,8 @@ class Client(discord.Client):
 				await msg.reply(f"serial error: {err.ty}{rest}")
 			case _:
 				traceback.print_exception(err)
-				await msg.reply(f":boom: `{ty.__name__}: {err}` :boom:")
+				if msg:
+					await msg.reply(f":boom: `{ty.__name__}: {err}` :boom:")
 
 	async def send_raw(self, msg: discord.Message, lines: list[str]):
 		enforce_is_admin(msg.author)
