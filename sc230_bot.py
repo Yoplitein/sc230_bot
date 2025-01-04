@@ -1,4 +1,5 @@
 import asyncio
+import collections
 import itertools
 import json
 import logging
@@ -499,6 +500,28 @@ class Client(discord.Client):
 				unknown.sort()
 				await msg.reply(f"unknown keys: {", ".join(map(chr, unknown))}") """
 
+class Peekable:
+	def __init__(self, iterable):
+		self.iter = iter(iterable)
+		self.queue = collections.deque()
+
+	def next(self):
+		if self.queue:
+			return self.queue.popleft()
+		else:
+			return next(self.iter)
+
+	def peek(self, n = 0):
+		if n < len(self.queue):
+			return self.queue[n]
+		for _ in range(n - len(self.queue) + 1):
+			try:
+				v = next(self.iter)
+				self.queue.append(v)
+			except StopIteration:
+				return None
+		return self.queue[n]
+
 class CommandError(Exception):
 	def __init__(self, msg: str, **kwargs):
 		self.msg = msg
@@ -646,15 +669,64 @@ class SerialProtocol:
 			return self.read_line().decode("ascii")
 		return await asyncio.to_thread(inner)
 
-	async def send_key(self, key: int | str, mode = "P"):
-		if type(key) is str:
+	async def send_key(self, key: int | str | bytes, mode = "P"):
+		if type(key) in [str, bytes]:
 			key = ord(key)
 		assert key in self.allowedKeys, f"{chr(key)!r} is not a valid key"
 		await self.send_raw(f"KEY,{chr(key)},{mode}")
 
-	async def send_keys(self, keys: bytes):
-		for key in keys:
-			await self.send_key(key)
+	async def send_keys(self, keys: str | bytes):
+		if type(keys) is str:
+			keys = keys.encode("ascii")
+
+		parsed = []
+		try:
+			it = Peekable(keys)
+			while True:
+				key = bytes([it.next()])
+
+				holdCount = 0
+				peekIndex = 0
+				while True:
+					match it.peek(peekIndex):
+						case c if c and chr(c) == "+":
+							holdCount += 1
+							peekIndex += 1
+						case _:
+							break
+				if holdCount > 0:
+					parsed.append((key, holdCount))
+					for _ in range(holdCount):
+						it.next()
+						pass
+				else:
+					parsed.append(key)
+		except StopIteration:
+			pass
+
+		pressed = {}
+		try:
+			for keyspec in parsed:
+				match keyspec:
+					case (char, count):
+						curCount = pressed.get(char, 0)
+						if curCount == 0:
+							await self.send_key(char, "H")
+						pressed[char] = curCount + count
+					case char:
+						await self.send_key(char)
+						for key, count in pressed.items():
+							if count == 1:
+								await self.send_key(key, "R")
+							if count > 0:
+								pressed[key] = count - 1
+		except:
+			for key in pressed:
+				try:
+					await self.send_key(key, "R")
+				except:
+					pass
+			raise
 
 	@staticmethod
 	def format_channel(id, name, freq):
