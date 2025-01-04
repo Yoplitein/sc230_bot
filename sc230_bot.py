@@ -1,4 +1,5 @@
 import asyncio
+import itertools
 import json
 import logging
 import os
@@ -25,7 +26,11 @@ class Client(discord.Client):
 			return
 
 		try:
-			[cmd, *args] = msg.content.split(" ")
+			cmd, args = None, None
+			if True:
+				split = msg.content.split(maxsplit=1)
+				cmd = split[0]
+				args = split[1].split(" ") if len(split) > 1 else []
 			match cmd:
 				case "$help" | "$links":
 					file = cmd.strip("$") + ".txt"
@@ -71,11 +76,13 @@ class Client(discord.Client):
 							await serialClient.send_keys(options[option])
 						await serialClient.send_key(ord('^'))
 				case "$freqrange":
+					raise CommandError("fixme")
 					async with SerialGuard(msg):
 						[minfreq, maxfreq] = args
 						await serialClient.send_raw(b"EPG")
 						await serialClient.send_keys(f"M>>^>>^^>^...{minfreq}E...{maxfreq}EMM<^")
 				case "$freq" | "$freqs":
+					raise CommandError("fixme")
 					async with SerialGuard(msg):
 						status = await msg.reply(f"0/{len(args)} frequencies processed")
 						notes = []
@@ -108,13 +115,129 @@ class Client(discord.Client):
 						else:
 							await status.delete()
 				case "$memclear":
+					raise CommandError("fixme")
 					async with SerialGuard(msg):
 						await serialClient.send_raw(b"EPG")
 						await serialClient.send_keys(b"MEE>>^^>>>^^")
 						await serialClient.send_raw(b"EPG")
-				case "$hardclear":
+				case "$tree":
 					async with SerialGuard(msg), ProgramGuard():
-						await serialClient.send_raw(b"CLR")
+						systems = []
+						systemHead = int((await serialClient.send_raw(b"SIH")).split(",")[1])
+						systemTail = int((await serialClient.send_raw(b"SIT")).split(",")[1])
+						for systemId in await walk_ids(systemHead, systemTail):
+							(_, _, systemName, _, _, locked, _, _, _, _, _, _, groupHead, groupTail, _) = (await serialClient.send_raw(f"SIN,{systemId}")).split(",")
+							locked = locked != "0"
+							[groupHead, groupTail] = map(int, [groupHead, groupTail])
+
+							locked = "\N{LOCK}" if locked else "\N{OPEN LOCK}"
+							embed = discord.Embed(title=f"{systemId} - {systemName}{locked}")
+							systems.append(embed)
+
+							noGroups = True
+							for groupId in await walk_ids(groupHead, groupTail):
+								noGroups = False
+
+								(_, _, groupName, _, locked, _, _, _, chanHead, chanTail, _) = (await serialClient.send_raw(f"GIN,{groupId}")).split(",")
+								locked = locked != "0"
+								[chanHead, chanTail] = map(int, [chanHead, chanTail])
+
+								locked = "\N{LOCK}" if locked else "\N{OPEN LOCK}"
+								embed.add_field(name=f"{groupId} - {groupName} {locked}", value="", inline=False)
+
+								channels = []
+								for channelId in await walk_ids(chanHead, chanTail):
+									(_, name, freq, _, _, _, _, locked, *_) = (await serialClient.send_raw(f"CIN,{channelId}")).split(",")
+									locked = locked != "0"
+									locked = "\N{LOCK}" if locked else "\N{OPEN LOCK}"
+									channels.append(f"{serialClient.format_channel(channelId, name, freq)} {locked}")
+								if not channels:
+									embed.add_field(name="", value="no channels")
+									continue
+
+								col1, col2 = [], []
+								try:
+									it = iter(channels)
+									while True:
+										col1.append(next(it))
+										col2.append(next(it))
+								except StopIteration:
+									pass
+								embed.add_field(name="", value="\n".join(col1))
+								embed.add_field(name="", value="\n".join(col2))
+							if noGroups:
+								embed.add_field(name="", value="no groups")
+						if not systems:
+							await msg.reply("no systems")
+						for batch in itertools.batched(systems, 10):
+							await msg.reply(embeds=batch)
+						return
+				case "$locked":
+					raise CommandError("fixme")
+					async with SerialGuard(msg), ProgramGuard():
+						lines = []
+						systemHead = int((await serialClient.send_raw(b"SIH")).split(",")[1])
+						systemTail = int((await serialClient.send_raw(b"SIT")).split(",")[1])
+						for systemId in await walk_ids(systemHead, systemTail):
+							# await serialClient.send_raw(f"QGL,{systemId},0000000000")
+							# await serialClient.send_raw(f"SIN,{systemId},,,,0,,,,")
+							(_, _, systemName, _, _, _, _, _, _, _, _, _, groupHead, groupTail, _) = (await serialClient.send_raw(f"SIN,{systemId}")).split(",")
+							[groupHead, groupTail] = map(int, [groupHead, groupTail])
+							lines.append(f"## {systemId} - {systemName}")
+							for groupId in await walk_ids(groupHead, groupTail):
+								# await serialClient.send_raw(f"GIN,{groupId},,,0")
+								(_, _, groupName, _, _, _, _, _, chanHead, chanTail, _) = (await serialClient.send_raw(f"GIN,{groupId}")).split(",")
+								[chanHead, chanTail] = map(int, [chanHead, chanTail])
+								lines.append(f"### {groupId} - {groupName}")
+								for channelId in await walk_ids(chanHead, chanTail):
+									(_, name, freq, *_) = (await serialClient.send_raw(f"CIN,{channelId}")).split(",")
+									lines.append(f"* {serialClient.format_channel(channelId, name, freq)}")
+						await msg.reply("\n".join(lines))
+						return
+				case "$lockout":
+					freqs = list(map(serialClient.format_frequency, " ".join(args).split()))
+					logger.debug(f"{freqs=}")
+					if not freqs:
+						await msg.reply("you must specify at least one frequency")
+						return
+					async with SerialGuard(msg), ProgramGuard():
+						locked = 0
+						errs = 0
+						for freq in freqs:
+							match (await serialClient.send_raw(f"LOF,{freq}")).split(","):
+								case ["LOF", "OK"]:
+									locked += 1
+								case ["LOF", "ERR"]:
+									errs += 1
+								case resp:
+									raise SerialError(f"unexpected response {resp=}")
+						if errs > 0:
+							errs = f", {errs} out of band"
+						await msg.reply(f"locked {locked} freqs{errs}")
+				case "$unlockall":
+					async with SerialGuard(msg), ProgramGuard():
+						while True:
+							match (await serialClient.send_raw(b"GLF")).split(","):
+								case ["GLF", "-1"]:
+									break
+								case ["GLF", freq]:
+									await serialClient.send_raw(f"ULF,{freq}")
+
+						await serialClient.send_raw(f"QSL,0000000000")
+
+						systemHead = int((await serialClient.send_raw(b"SIH")).split(",")[1])
+						systemTail = int((await serialClient.send_raw(b"SIT")).split(",")[1])
+						for systemId in await walk_ids(systemHead, systemTail):
+							await serialClient.send_raw(f"QGL,{systemId},0000000000")
+							await serialClient.send_raw(f"SIN,{systemId},,,,0,,,,")
+							(_, _, systemName, _, _, _, _, _, _, _, _, _, groupHead, groupTail, _) = (await serialClient.send_raw(f"SIN,{systemId}")).split(",")
+							[groupHead, groupTail] = map(int, [groupHead, groupTail])
+							for groupId in await walk_ids(groupHead, groupTail):
+								await serialClient.send_raw(f"GIN,{groupId},,,0")
+								(_, _, groupName, _, _, _, _, _, chanHead, chanTail, _) = (await serialClient.send_raw(f"GIN,{groupId}")).split(",")
+								[chanHead, chanTail] = map(int, [chanHead, chanTail])
+								for channelId in await walk_ids(chanHead, chanTail):
+									await serialClient.send_raw(f"CIN,{channelId},,,,,,,0,,,")
 				case "$systems":
 					async with SerialGuard(msg), ProgramGuard():
 						head = int((await serialClient.send_raw(b"SIH")).split(",")[1])
@@ -146,6 +269,12 @@ class Client(discord.Client):
 					newName = " ".join(newName)
 					async with SerialGuard(msg), ProgramGuard():
 						await serialClient.send_raw(f"SIN,{id},{newName},,,,,,,")
+				case "$systemlock":
+					[id, locked] = args
+					id = int(id)
+					locked = parse_bool(locked)
+					async with SerialGuard(msg), ProgramGuard():
+						await serialClient.send_raw(f"SIN,{id},,,,{locked & 1},,,,")
 				case "$groups":
 					systemId = int(args[0])
 					async with SerialGuard(msg), ProgramGuard():
@@ -180,6 +309,12 @@ class Client(discord.Client):
 					newName = " ".join(newName)
 					async with SerialGuard(msg), ProgramGuard():
 						await serialClient.send_raw(f"GIN,{id},{newName},,")
+				case "$grouplock":
+					[id, locked] = args
+					id = int(id)
+					locked = parse_bool(locked)
+					async with SerialGuard(msg), ProgramGuard():
+						await serialClient.send_raw(f"GIN,{id},,,{locked & 1}")
 				case "$channels":
 					groupId = int(args[0])
 					async with SerialGuard(msg), ProgramGuard():
@@ -190,12 +325,7 @@ class Client(discord.Client):
 						for id in await walk_ids(head, tail):
 							match (await serialClient.send_raw(f"CIN,{id}")).split(","):
 								case ["CIN", name, freq, *_]:
-									freq = serialClient.parse_frequency(freq)
-									if name.endswith("MHz"):
-										name = ""
-									else:
-										name = f" ({name})"
-									channels.append(f"* {id} - {freq}{name}")
+									channels.append(serialClient.format_channel(id, name, freq))
 								case resp:
 									logger.debug(f"weird response for channel {id}: {resp!r}")
 						if channels:
@@ -214,7 +344,7 @@ class Client(discord.Client):
 							await msg.reply(f"## {groupName}", embed=embed)
 						else:
 							await msg.reply("no channels found")
-				case "$channeladd":
+				case "$chanadd":
 					groupId = int(args[0])
 					frequencies = list(map(serialClient.format_frequency, " ".join(args[1:]).split()))
 					if not frequencies:
@@ -246,17 +376,23 @@ class Client(discord.Client):
 							errors = ""
 						await msg.reply(f"created {len(frequencies) - numErrors} new channels{errors}")
 						return
-				case "$channeldel":
+				case "$chandel":
 					id = int(args[0])
 					async with SerialGuard(msg), ProgramGuard():
 						await serialClient.send_raw(f"DCH,{id}")
-				case "$channelname":
+				case "$channame":
 					[id, *newName] = args
 					id = int(id)
 					newName = " ".join(newName)
 					async with SerialGuard(msg), ProgramGuard():
 						await serialClient.send_raw(f"CIN,{id},{newName},,,,,,,,,")
-				case "$channelfreq":
+				case "$chanlock":
+					[id, locked] = args
+					id = int(id)
+					locked = parse_bool(locked)
+					async with SerialGuard(msg), ProgramGuard():
+						await serialClient.send_raw(f"CIN,{id},,,,,,,{locked & 1},,,")
+				case "$chanfreq":
 					[id, freq] = args
 					id = int(id)
 					freq = serialClient.format_frequency(freq)
@@ -304,6 +440,10 @@ class Client(discord.Client):
 					if msg.author.id not in self.rawInputUsers:
 						raise CommandError("you are not in raw input mode")
 					self.rawInputUsers.remove(msg.author.id)
+				case "$hardclear":
+					enforce_is_admin(msg.author)
+					async with SerialGuard(msg), ProgramGuard():
+						await serialClient.send_raw(b"CLR")
 				case _:
 					if msg.author.id in self.rawInputUsers:
 						await self.send_raw(msg, msg.content.split("\n"))
@@ -376,9 +516,21 @@ def replace_special_chars(str: str) -> str:
 		.replace("\x11", "\N{DOWNWARDS ARROW}")
 	)
 
+def parse_bool(str: str) -> bool:
+	match str.lower():
+		case "1" | "yes" | "on":
+			return True
+		case "0" | "no" | "off":
+			return False
+		case _:
+			raise CommandError(f"ambiguous bool {str!r}")
+
 async def walk_ids(head: int, tail: int) -> list[int]:
 	assert SerialGuard.lock.locked(), "trying to walk_ids without serial lock held"
 	assert ProgramGuard.level > 0, "trying to walk_ids outside of program mode"
+
+	if head == -1:
+		return []
 
 	ids = [head]
 	while tail != "-1" and head != tail:
@@ -504,12 +656,23 @@ class SerialProtocol:
 			await self.send_key(key)
 
 	@staticmethod
+	def format_channel(id, name, freq):
+		freq = serialClient.parse_frequency(freq)
+		if name.endswith("MHz"):
+			name = ""
+		else:
+			name = f" ({name})"
+		return f"{id} - {freq}{name}"
+
+	@staticmethod
 	def format_frequency(freq: str) -> str:
+		"Format frequency to be sent over protocol"
 		freq = int(float(freq) * 1e4)
 		return f"{freq:08}"
 
 	@staticmethod
 	def parse_frequency(freq: str) -> str:
+		"Parse frequency read from protocol"
 		freq = int(freq) / 1e4
 		return f"{freq}MHz"
 

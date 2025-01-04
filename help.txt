@@ -12,8 +12,14 @@
   * add specific frequencies to list of scan candidates
 * `$memclear`
   * clear frequencies saved with `$freq`
-* `$hardclear`
-  * factory reset
+* `$locked`
+  * print locked out systems/groups/channels
+* `$lockout <freq>`
+  * lock out specific frequencies
+* `$unlockall`
+  * unlock all locked out systems/groups/channels
+* `$tree`
+  * print all systems, their groups, and channels
 * `$systems`
   * list systems and their IDs
 * `$systemadd`
@@ -22,6 +28,8 @@
   * delete a system
 * `$systemname <system id> <name>`
   * set a system's name. limit 16 characters
+* `$systemlock <system id> <locked>`
+  * set a system's lockout status
 * `$groups <system id>`
   * list groups and IDs for the given system
 * `$groupadd <system id>`
@@ -30,25 +38,31 @@
   * delete a group
 * `$groupname <group id> <name>`
   * set a group's name. limit 16 characters
+* `$grouplock <group id> <locked>`
+  * set a group's lockout status
 * `$channels <group id>`
   * list channels in a given group
-* `$channeladd <group id>`
+* `$chanadd <group id>`
   * add a new channel to a group
-* `$channeldel <channel id>`
+* `$chandel <channel id>`
   * delete a channel
-* `$channelname <channel id> <name>`
+* `$channame <channel id> <name>`
   * set a channel's name. limit 16 characters
-* `$channelfreq <channel id> <frequency in MHz>`
+* `$chanlock <channel id> <locked>`
+  * set a channel's lockout status
+* `$chanfreq <channel id> <frequency in MHz>`
   * set a channel's frequency
 * `$key <keys>` / `$keyon` / `$keyoff`
   * press a series of buttons on the scanner. case insensitive, whitespace ignored
-  * `$keyon`/`$keyoff` toggle treating all messages as keycode inputs
+  * `$keyon`/`$keyoff` toggle treating all messages as keycode inputs (per-user)
   * see list of supported keycodes below
 * `$sweep`
   * admin only. delete all messages in the channel :broom::dash:
 * `$raw <body>` / `$rawon` / `$rawoff`
   * admin only. allows transmitting raw protocol data
   * `$rawon`/`$rawoff` like keycode commands treats all messages as protocol data
+* `$hardclear`
+  * admin only. factory reset
 
 Keycodes:
 ```
