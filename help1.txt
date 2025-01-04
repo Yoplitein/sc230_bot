@@ -10,9 +10,17 @@
 * `$freq <freq in MHz>`
   * tune in to a specific frequency (to nearest 5kHz)
 * `$freqrange <min freq> <max freq>`
-  * scan through a range of frequencies
-* `$locked`
-  * print locked out systems/groups/channels
+  * scan through a range of frequencies. overrides custom search group 0
+* `$cs [<group ids>]`
+  * switch to custom search mode with the given group IDs enabled, defaults to all
+* `$csgroups`
+  * print custom search groups
+* `$csfreq <group id> <min freq> <max freq>`
+  * set custom search group min/max frequencies. note that this may be overridden on group 0 by `$freqrange`
+* `$csname <group id> <name>`
+  * print custom search group name
+* `$csall`
+  * programs set of search groups covering the hardware's frequency range
 * `$lockout <freq>`
   * lock out specific frequencies
 * `$unlockall`
@@ -39,19 +47,3 @@
   * set a group's name. limit 16 characters
 * `$grouplock <group id> <locked>`
   * set a group's lockout status
-* `$channels <group id>`
-  * list channels in a given group
-* `$chanadd <group id>`
-  * add a new channel to a group
-* `$chandel <channel id>`
-  * delete a channel
-* `$channame <channel id> <name>`
-  * set a channel's name. limit 16 characters
-* `$chanlock <channel id> <locked>`
-  * set a channel's lockout status
-* `$chanfreq <channel id> <frequency in MHz>`
-  * set a channel's frequency
-* `$key <keys>` / `$keyon` / `$keyoff`
-  * press a series of buttons on the scanner. case insensitive, whitespace ignored
-  * `$keyon`/`$keyoff` toggle treating all messages as keycode inputs (per-user)
-  * see list of supported keycodes below

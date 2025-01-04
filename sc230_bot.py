@@ -106,18 +106,81 @@ class Client(discord.Client):
 					[minfreq, maxfreq] = args
 					minfreq = serialClient.format_frequency(minfreq)
 					maxfreq = serialClient.format_frequency(maxfreq)
-					username = f"$r:{msg.author.display_name.replace(",", "")[:16]}"
+					username = f"${serialClient.sanitize_string(msg.author.display_name)}"
 					async with SerialGuard(msg):
 						async with ProgramGuard():
 							await serialClient.send_raw(f"CSG,{"1" * 9}0")
 							await serialClient.send_raw(f"CSP,0,{username},{minfreq},{maxfreq},0,AUTO,0,2,0")
 						await serialClient.send_keys(b"F+S.>E")
-				case "$memclear":
-					raise CommandError("fixme")
+				case "$cs":
+					groups = "0123456789" if not args else "".join("".join(args).split())
+					for v in groups:
+						if v not in "0123456789":
+							raise CommandError("search groups must be given as numbers 0-9")
 					async with SerialGuard(msg):
-						await serialClient.send_raw(b"EPG")
-						await serialClient.send_keys(b"MEE>>^^>>>^^")
-						await serialClient.send_raw(b"EPG")
+						async with ProgramGuard():
+							state = list("1" * 10)
+							for v in groups:
+								v = int(v)
+								state[v - 1] = "0"
+							state = "".join(state)
+							await serialClient.send_raw(f"CSG,{state}")
+						await serialClient.send_keys("F+S.>E")
+				case "$csgroups":
+					async with SerialGuard(msg), ProgramGuard():
+						lines = []
+						for id in range(10):
+							id = (id + 1) % 10
+							match (await serialClient.send_raw(f"CSP,{id}")).split(","):
+								case ["CSP", name, minfreq, maxfreq, *_]:
+									minfreq = serialClient.parse_frequency(minfreq)
+									maxfreq = serialClient.parse_frequency(maxfreq)
+									lines.append(f"* {id} - {name}")
+									lines.append(f"  * {minfreq} to {maxfreq}")
+								case resp:
+									raise CommandError(f"unexpected response {resp=}")
+						await msg.reply("\n".join(lines))
+						return
+				case "$csfreq":
+					[group, minfreq, maxfreq] = args
+					if group not in "0123456789":
+						raise CommandError("search groups must be given as numbers 0-9")
+					minfreq = serialClient.format_frequency(minfreq)
+					maxfreq = serialClient.format_frequency(maxfreq)
+					async with SerialGuard(msg), ProgramGuard():
+						await serialClient.send_raw(f"CSP,{group},,{minfreq},{maxfreq},,,,,")
+				case "$csname":
+					group = args[0]
+					name = " ".join(args[1:])
+					if group not in "0123456789":
+						raise CommandError("search groups must be given as numbers 0-9")
+					async with SerialGuard(msg), ProgramGuard():
+						await serialClient.send_raw(f"CSP,{group},{name},,,,,,,")
+				case "$csall":
+					bands = {
+						"Petrol/CB/Ham": ("25", "54"),
+						"Ham/Fed/Military": ("137", "174"),
+						"More Ham/Fed": ("400", "512"),
+						"Public": ("806", "956"),
+						"GHz ham": ("1240", "1300")
+					}
+					async with SerialGuard(msg):
+						async with ProgramGuard():
+							enabled = ""
+							for (group, (name, (minfreq, maxfreq))) in enumerate(bands.items()):
+								group += 1
+								enabled += str(group)
+								minfreq = serialClient.format_frequency(minfreq)
+								maxfreq = serialClient.format_frequency(maxfreq)
+								await serialClient.send_raw(f"CSP,{group},{name},{minfreq},{maxfreq},,,,,")
+
+							state = list("1" * 10)
+							for v in enabled:
+								v = int(v)
+								state[v - 1] = "0"
+							state = "".join(state)
+							await serialClient.send_raw(f"CSG,{state}")
+						await serialClient.send_keys("F+S.>E")
 				case "$tree":
 					async with SerialGuard(msg), ProgramGuard():
 						systems = []
@@ -264,7 +327,7 @@ class Client(discord.Client):
 				case "$systemname":
 					[id, *newName] = args
 					id = int(id)
-					newName = " ".join(newName)
+					newName = serialClient.sanitize_string(" ".join(newName))
 					async with SerialGuard(msg), ProgramGuard():
 						await serialClient.send_raw(f"SIN,{id},{newName},,,,,,,")
 				case "$systemlock":
@@ -304,7 +367,7 @@ class Client(discord.Client):
 				case "$groupname":
 					[id, *newName] = args
 					id = int(id)
-					newName = " ".join(newName)
+					newName = serialClient.sanitize_string(" ".join(newName))
 					async with SerialGuard(msg), ProgramGuard():
 						await serialClient.send_raw(f"GIN,{id},{newName},,")
 				case "$grouplock":
@@ -381,7 +444,7 @@ class Client(discord.Client):
 				case "$channame":
 					[id, *newName] = args
 					id = int(id)
-					newName = " ".join(newName)
+					newName = serialClient.sanitize_string(" ".join(newName))
 					async with SerialGuard(msg), ProgramGuard():
 						await serialClient.send_raw(f"CIN,{id},{newName},,,,,,,,,")
 				case "$chanlock":
@@ -448,15 +511,14 @@ class Client(discord.Client):
 					await msg.reply("restarting")
 					os.execvp(sys.orig_argv[0], sys.orig_argv)
 				case _:
+					if msg.content.startswith("$"):
+						raise CommandError(f"unknown command {cmd}")
 					if msg.author.id in self.rawInputUsers:
 						await self.send_raw(msg, msg.content.split("\n"))
 						return
 					if msg.author.id in self.keyInputUsers:
 						await self.send_keys(msg, msg.content)
 						return
-
-					if msg.content.startswith("$"):
-						raise CommandError(f"unknown command {cmd}")
 					return
 
 			await msg.add_reaction("\N{WHITE HEAVY CHECK MARK}")
@@ -465,14 +527,13 @@ class Client(discord.Client):
 			raise err
 
 	async def on_error(self, event, msg = None, *args, **kwargs):
-		logger.debug(f"on_error {event=} {msg=} {args=} {kwargs=}")
 		(ty, err, _) = sys.exc_info()
 		match err:
 			case CommandError():
 				await msg.reply(err.msg)
 			case SerialError():
 				rest = "" if not err.rest else f"\n{rest=}"
-				await msg.reply(f"serial error: {err.ty}{rest}")
+				await msg.reply(f":boom: serial error: {err.ty}:boom:{rest}")
 			case _:
 				traceback.print_exception(err)
 				if msg:
@@ -751,6 +812,10 @@ class SerialProtocol:
 		"Parse frequency read from protocol"
 		freq = int(freq) / 1e4
 		return f"{freq}MHz"
+
+	@staticmethod
+	def sanitize_string(str: str) -> str:
+		return str.replace(",", "")[:16]
 
 config = None
 serialClient: SerialProtocol = None
