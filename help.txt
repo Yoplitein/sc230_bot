@@ -6,10 +6,10 @@
   * print status lines (see also webcam)
 * `$search <public/news/ham/marine/rail/air/cb/gmrs/racing/special/weather>`
   * scan preprogrammed frequency ranges
+* `$freq <freq in MHz>`
+  * tune in to a specific frequency (to nearest 5kHz)
 * `$freqrange <min freq> <max freq>`
   * scan through a range of frequencies
-* `$freq [<freq in MHz> ...]`
-  * add specific frequencies to list of scan candidates
 * `$memclear`
   * clear frequencies saved with `$freq`
 * `$locked`

@@ -87,45 +87,27 @@ class Client(discord.Client):
 							await serialClient.send_keys(b"M>>^^")
 							await serialClient.send_keys(options[option])
 						await serialClient.send_key(ord('^'))
+				case "$freq":
+					if len(args) != 1:
+						raise CommandError("you must specify exactly one frequency")
+					[freq] = args
+					freq = serialClient.format_frequency(freq)
+					async with SerialGuard(msg):
+						match (await serialClient.send_raw(f"QSH,{freq},0,AUTO,0,2,0,1,0,0")).split(","):
+							case ["QSH", "OK"]:
+								pass
+							case ["QSH", "ERR"]:
+								raise CommandError("couldn't tune in, is the scanner busy?")
 				case "$freqrange":
-					raise CommandError("fixme")
+					[minfreq, maxfreq] = args
+					minfreq = serialClient.format_frequency(minfreq)
+					maxfreq = serialClient.format_frequency(maxfreq)
+					username = f"$fr:{msg.author.display_name.replace(",", "")[:16]}"
 					async with SerialGuard(msg):
-						[minfreq, maxfreq] = args
-						await serialClient.send_raw(b"EPG")
-						await serialClient.send_keys(f"M>>^>>^^>^...{minfreq}E...{maxfreq}EMM<^")
-				case "$freq" | "$freqs":
-					raise CommandError("fixme")
-					async with SerialGuard(msg):
-						status = await msg.reply(f"0/{len(args)} frequencies processed")
-						notes = []
-						for (i, freq) in enumerate(args):
-							try:
-								await serialClient.send_raw(b"EPG")
-								await serialClient.send_raw(b"QSH,0,0,AUTO,0,2,0,1,0,0")
-								await serialClient.send_keys(f"{freq}E")
-
-								[_, sline, *_] = (await serialClient.send_raw(b"STS")).split(",")
-								if "out of band" in sline.lower():
-									notes.append(f"{freq}: out of band")
-									await serialClient.send_raw(b"EPG")
-									continue
-
-								await serialClient.send_key(ord('E'))
-
-								[_, sline, *_] = (await serialClient.send_raw(b"STS")).split(",")
-								if "frequency exists" in sline.lower():
-									notes.append(f"{freq}: already exists")
-
-								await serialClient.send_raw(b"EPG")
-							finally:
-								await status.edit(content=f"{i + 1}/{len(args)} frequencies processed ({len(notes)} notes)")
-						if len(args) > 1:
-							await serialClient.send_key(ord('H'))
-						if len(notes) > 0:
-							await status.edit(content=f"```\n{"\n".join(notes)}\n```")
-							return
-						else:
-							await status.delete()
+						async with ProgramGuard():
+							await serialClient.send_raw(f"CSG,{"1" * 9}0")
+							await serialClient.send_raw(f"CSP,0,{username},{minfreq},{maxfreq},0,AUTO,0,2,0")
+						await serialClient.send_keys(b"M>>^>^")
 				case "$memclear":
 					raise CommandError("fixme")
 					async with SerialGuard(msg):
