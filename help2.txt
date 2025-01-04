@@ -1,0 +1,29 @@
+* `$sweep`
+  * admin only. delete all messages in the channel :broom::dash:
+* `$raw <body>` / `$rawon` / `$rawoff`
+  * admin only. allows transmitting raw protocol data
+  * `$rawon`/`$rawoff` like keycode commands treats all messages as protocol data
+* `$hardclear`
+  * admin only. factory reset
+* `$restart`
+  * admin only. restarts bot
+
+## keycodes
+```
+M - Menu
+F - Function
+H - Hold
+S - Scan
+L - Lockout (L/O)
+C - Car
+0-9 - Digits
+. - Decimal / No
+E - Enter / Yes
+> - Scroll right
+< - Scroll left
+^ - Enter
+P - Power
+```
+
+### key chords
+Keys can be sent while other keys are held by following the held key with a `+`. E.g. `F+P` will hold Func, press power, and finally release func.

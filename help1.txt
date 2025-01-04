@@ -1,3 +1,4 @@
+## Commands
 * `$help`
   * this help
 * `$links`
@@ -10,8 +11,6 @@
   * tune in to a specific frequency (to nearest 5kHz)
 * `$freqrange <min freq> <max freq>`
   * scan through a range of frequencies
-* `$memclear`
-  * clear frequencies saved with `$freq`
 * `$locked`
   * print locked out systems/groups/channels
 * `$lockout <freq>`
@@ -56,29 +55,3 @@
   * press a series of buttons on the scanner. case insensitive, whitespace ignored
   * `$keyon`/`$keyoff` toggle treating all messages as keycode inputs (per-user)
   * see list of supported keycodes below
-* `$sweep`
-  * admin only. delete all messages in the channel :broom::dash:
-* `$raw <body>` / `$rawon` / `$rawoff`
-  * admin only. allows transmitting raw protocol data
-  * `$rawon`/`$rawoff` like keycode commands treats all messages as protocol data
-* `$hardclear`
-  * admin only. factory reset
-* `$restart`
-  * admin only. restarts bot
-
-Keycodes:
-```
-M - Menu
-F - Function
-H - Hold
-S - Scan
-L - Lockout (L/O)
-C - Car
-0-9 - Digits
-. - Decimal / No
-E - Enter / Yes
-> - Scroll right
-< - Scroll left
-^ - Enter
-P - Power
-```

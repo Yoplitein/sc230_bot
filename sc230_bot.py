@@ -1,5 +1,6 @@
 import asyncio
 import collections
+import glob
 import itertools
 import json
 import logging
@@ -46,10 +47,12 @@ class Client(discord.Client):
 				args = split[1].split(" ") if len(split) > 1 else []
 			match cmd:
 				case "$help" | "$links":
-					file = cmd.strip("$") + ".txt"
-					with open(file, "r") as f:
-						help = f.read().strip()
-						await msg.reply(help)
+					files = glob.glob(cmd.strip("$") + "*.txt")
+					files.sort()
+					for file in files:
+						with open(file, "r") as f:
+							contents = f.read().strip()
+							await msg.reply(contents)
 					return
 				case "$status":
 					async with SerialGuard(msg):
