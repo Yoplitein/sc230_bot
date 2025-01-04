@@ -117,13 +117,11 @@ class Client(discord.Client):
 						await serialClient.send_raw(b"CLR")
 				case "$systems":
 					async with SerialGuard(msg), ProgramGuard():
-						numSystems = int((await serialClient.send_raw(b"SCT")).split(",")[1])
 						head = int((await serialClient.send_raw(b"SIH")).split(",")[1])
 						tail = int((await serialClient.send_raw(b"SIT")).split(",")[1])
-						ids = walk_ids(numSystems, head, tail)
 
 						systems = []
-						for id in ids:
+						for id in await walk_ids(head, tail):
 							match (await serialClient.send_raw(f"SIN,{id}")).split(","):
 								case ["SIN", _, name, *_]:
 									systems.append(f"* {id} - {name}")
@@ -153,10 +151,9 @@ class Client(discord.Client):
 					async with SerialGuard(msg), ProgramGuard():
 						(_, _, systemName, _, _, _, _, _, _, _, _, _, head, tail, _) = (await serialClient.send_raw(f"SIN,{systemId}")).split(",")
 						[head, tail] = map(int, [head, tail])
-						ids = list(range(head, tail + 1))
 
 						groups = []
-						for id in ids:
+						for id in await walk_ids(head, tail):
 							match (await serialClient.send_raw(f"GIN,{id}")).split(","):
 								case ["GIN", _, name, *_]:
 									groups.append(f"* {id} - {name}")
@@ -188,10 +185,9 @@ class Client(discord.Client):
 					async with SerialGuard(msg), ProgramGuard():
 						(_, _, groupName, _, _, _, _, _, head, tail, _) = (await serialClient.send_raw(f"GIN,{groupId}")).split(",")
 						[head, tail] = map(int, [head, tail])
-						ids = list(range(head, tail + 1))
 
 						channels = []
-						for id in ids:
+						for id in await walk_ids(head, tail):
 							match (await serialClient.send_raw(f"CIN,{id}")).split(","):
 								case ["CIN", name, freq, *_]:
 									freq = serialClient.parse_frequency(freq)
@@ -380,21 +376,18 @@ def replace_special_chars(str: str) -> str:
 		.replace("\x11", "\N{DOWNWARDS ARROW}")
 	)
 
-def walk_ids(count, head, tail):
-	ids = []
-	match count:
-		case 0:
-			pass
-		case 1:
-			ids.append(head)
-		case 2:
-			ids.extend([head, tail])
-		case _:
-			ids.extend([head, tail])
-			count -= 2
-			for x in range(count):
-				ids.append(tail - (x + 1))
-	ids.sort()
+async def walk_ids(head: int, tail: int) -> list[int]:
+	assert SerialGuard.lock.locked(), "trying to walk_ids without serial lock held"
+	assert ProgramGuard.level > 0, "trying to walk_ids outside of program mode"
+
+	ids = [head]
+	while tail != "-1" and head != tail:
+		match (await serialClient.send_raw(f"FWD,{head}")).split(","):
+			case ["FWD", "-1"]:
+				assert False, "forward id is -1???"
+			case ["FWD", next]:
+				head = int(next)
+		ids.append(head)
 	return ids
 
 class SerialError(Exception):
@@ -423,14 +416,21 @@ class SerialGuard:
 			await self.pendingMsg.delete()
 
 class ProgramGuard:
-	@staticmethod
-	async def __aenter__():
+	level = 0
+
+	@classmethod
+	async def __aenter__(self, ):
+		self.level += 1
+		if self.level > 1:
+			return
 		await serialClient.send_raw(b"EPG")
 		await serialClient.send_raw(b"PRG")
 
-	@staticmethod
-	async def __aexit__(*_):
-		await serialClient.send_raw(b"EPG")
+	@classmethod
+	async def __aexit__(self, *_):
+		self.level -= 1
+		if self.level == 0:
+			await serialClient.send_raw(b"EPG")
 
 class SerialProtocol:
 	allowedKeys = b"MFHSLC1234567890.E><^P"
