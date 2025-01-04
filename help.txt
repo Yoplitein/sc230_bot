@@ -3,29 +3,49 @@
 * `$links`
   * useful links
 * `$status`
-  * prints status lines (see also webcam)
+  * print status lines (see also webcam)
 * `$search <public/news/ham/marine/rail/air/cb/gmrs/racing/special/weather>`
-  * scans preprogrammed frequency ranges
+  * scan preprogrammed frequency ranges
 * `$freqrange <min freq> <max freq>`
   * scan through a range of frequencies
 * `$freq [<freq in MHz> ...]`
-  * adds specific frequencies to list of scan candidates
+  * add specific frequencies to list of scan candidates
 * `$memclear`
   * clear frequencies saved with `$freq`
 * `$hardclear`
   * factory reset
 * `$systems`
   * list systems and their IDs
+* `$systemadd`
+  * add a new system
+* `$systemdel <system id>`
+  * delete a system
+* `$systemname <system id> <name>`
+  * set a system's name. limit 16 characters
 * `$groups <system id>`
   * list groups and IDs for the given system
+* `$groupadd <system id>`
+  * add a new group to a system
+* `$groupdel <group id>`
+  * delete a group
+* `$groupname <group id> <name>`
+  * set a group's name. limit 16 characters
 * `$channels <group id>`
   * list channels in a given group
+* `$channeladd <group id>`
+  * add a new channel to a group
+* `$channeldel <channel id>`
+  * delete a channel
+* `$channelname <channel id> <name>`
+  * set a channel's name. limit 16 characters
+* `$channelfreq <channel id> <frequency in MHz>`
+  * set a channel's frequency
 * `$key <keys>` / `$keyon` / `$keyoff`
-  * presses a series of buttons on the scanner. case insensitive, whitespace ignored
+  * press a series of buttons on the scanner. case insensitive, whitespace ignored
   * `$keyon`/`$keyoff` toggle treating all messages as keycode inputs
   * see list of supported keycodes below
 * `$sweep`
-  * admin only. deletes all messages in the channel :broom::dash:
+  * admin only. delete all messages in the channel :broom::dash:
 * `$raw <body>` / `$rawon` / `$rawoff`
   * admin only. allows transmitting raw protocol data
   * `$rawon`/`$rawoff` like keycode commands treats all messages as protocol data
