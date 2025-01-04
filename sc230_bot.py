@@ -7,50 +7,32 @@ import discord
 import serial
 
 class Client(discord.Client):
+	def __init__(self, *args, **kwargs):
+		super().__init__(*args, **kwargs)
+
+		self.rawInputUsers = set()
+		self.keyInputUsers = set()
+
 	async def on_ready(self):
 		print("ready")
-		""" channel = self.get_channel(config["voice_channel"])
+		""" channel = self.get_channel(config["control_channels"])
 		vc = await channel.connect()
 		src = discord.FFmpegPCMAudio("anoisesrc=c=brown", before_options="-loglevel trace -f lavfi", options="-loglevel trace")
 		vc.play(src) """
 
 	async def on_message(self, msg: discord.Message):
-		if msg.channel.id != config["voice_channel"] or msg.author == self.user:
+		if msg.author == self.user or msg.channel.id not in config["control_channels"]:
 			return
 
 		try:
-			[cmd, *args] = msg.content.split()
+			[cmd, *args] = msg.content.split(" ")
 			match cmd:
-				case "$sweep":
-					if msg.author.id != config["admin_id"]:
-						await msg.reply("illegal")
-						return
-
-					queue = []
-					channel = self.get_channel(config["voice_channel"])
-					async for msg in channel.history(limit=None):
-						if msg.pinned or msg.content.startswith("~"): continue
-						queue.append(msg)
-						if len(queue) >= 100:
-							await channel.delete_messages(queue)
-							queue.clear()
-					if len(queue) > 0:
-						await channel.delete_messages(queue)
-
-					return
-				case "$help":
-					with open("help.txt", "r") as f:
+				case "$help" | "$links":
+					file = cmd.strip("$") + ".txt"
+					with open(file, "r") as f:
 						help = f.read().strip()
 						await msg.reply(help)
-				case "$raw":
-					if msg.author.id != config["admin_id"]:
-						await msg.reply("illegal")
-						return
-
-					async with SerialGuard(msg):
-						content = " ".join(args)
-						resp = await serialClient.send_raw(content)
-						await msg.reply(f"```{resp.strip()}```")
+					return
 				case "$status":
 					async with SerialGuard(msg):
 						body = (await serialClient.send_raw(b"STS"))
@@ -59,7 +41,9 @@ class Client(discord.Client):
 						l2 = l2.strip()
 						l3 = l3.strip()
 						l4 = l4.strip()
+						[l1, l2, l3, l4] = [replace_special_chars(v) for v in [l1, l2, l3, l4]]
 						await msg.reply(f"```\n{l1}\n{l2}\n{l3}\n{l4}\n```")
+						return
 				case "$search":
 					options = {
 						"public": "",
@@ -76,8 +60,7 @@ class Client(discord.Client):
 					}
 					option = msg.content.split(" ", 1)[1] or [""]
 					if option not in options:
-						await msg.reply(f"unknown search option {option!r}")
-						return
+						raise CommandError(f"unknown search option {option!r}")
 
 					async with SerialGuard(msg):
 						await serialClient.send_raw(b"EPG")
@@ -142,24 +125,9 @@ class Client(discord.Client):
 							await serialClient.send_raw(b"PRG")
 
 							numSystems = int((await serialClient.send_raw(b"SCT")).split(",")[1])
-							print(f"{numSystems=}")
 							head = int((await serialClient.send_raw(b"SIH")).split(",")[1])
 							tail = int((await serialClient.send_raw(b"SIT")).split(",")[1])
-							ids = []
-							match numSystems:
-								case 0:
-									await msg.reply("no systems")
-									return
-								case 1:
-									ids.append(head)
-								case 2:
-									ids.extend([head, tail])
-								case _:
-									ids.extend([head, tail])
-									numSystems -= 2
-									for x in range(numSystems):
-										ids.append(tail - (x + 1))
-							ids.sort()
+							ids = walk_ids(numSystems, head, tail)
 
 							systems = []
 							for id in ids:
@@ -176,30 +144,86 @@ class Client(discord.Client):
 								await msg.reply("no systems found")
 						finally:
 							await serialClient.send_raw(b"EPG")
-				case _:
+				case "$groups":
+					systemId = int(args[0])
 					async with SerialGuard(msg):
-						if msg.content.startswith("~"):
+						try:
+							await serialClient.send_raw(b"EPG")
+							await serialClient.send_raw(b"PRG")
+
+							(_, _, _, _, hld, lout, res, dly, skp, emg, revIdx, fwdIdx, head, tail, seq) = (await serialClient.send_raw(f"SIN,{systemId}")).split(",")
+							print(f"{hld=} {lout=} {res=} {dly=}, {skp=}, {emg=}, {revIdx=} {fwdIdx=} {head=} {tail=} {seq=}")
 							return
-						if msg.content.startswith("$"):
-							await msg.reply(f"unknown command `{cmd}`")
-							return
+							ids = walk_ids(numSystems, head, tail)
 
-						await serialClient.send_keys(msg.content.upper())
+							systems = []
+							for id in ids:
+								match (await serialClient.send_raw(f"SIN,{id}")).split(","):
+									case ["SIN", _, name, *_]:
+										systems.append(f"* {id} - {name}")
+									case ["ERR", *_]:
+										print(f"got err for system id {id}")
+									case owo:
+										print(f"weird response for system {id}: {owo=}")
+							if systems:
+								await msg.reply("\n".join(systems))
+							else:
+								await msg.reply("no systems found")
+						finally:
+							await serialClient.send_raw(b"EPG")
+				case "$key":
+					await self.send_keys(msg, " ".join(args))
+				case "$keyon":
+					if msg.author.id in self.rawInputUsers:
+						raise CommandError("you are already in raw input mode")
+					if msg.author.id in self.keyInputUsers:
+						raise CommandError("you are already in key input mode")
+					self.keyInputUsers.add(msg.author.id)
+				case "$keyoff":
+					if msg.author.id not in self.keyInputUsers:
+						raise CommandError("you are not in key input mode")
+					self.keyInputUsers.remove(msg.author.id)
+				case "$sweep":
+					enforce_is_admin(msg.author)
 
-						""" unknown = set()
-						for key in msg.content:
-							key = ord(key)
-							try:
-								assert key < 128
-								await serialClient.send_key(key)
-							except Exception as e:
-								unknown.add(key)
-						if len(unknown) > 0:
-							unknown = list(unknown)
-							unknown.sort()
-							await msg.reply(f"unknown keys: {", ".join(map(chr, unknown))}") """
+					# should be enforced above but just to be safe
+					assert msg.channel.id in config["control_channels"]
 
+					queue = []
+					async for msg in msg.channel.history(limit=None):
+						if msg.pinned or msg.content.startswith("~"): continue
+						queue.append(msg)
+						if len(queue) >= 100:
+							await msg.channel.delete_messages(queue)
+							queue.clear()
+					if len(queue) > 0:
+						await msg.channel.delete_messages(queue)
+					return
+				case "$raw":
+					enforce_is_admin(msg.author)
+					await self.send_raw(msg, " ".join(args).split("\n"))
+				case "$rawon":
+					enforce_is_admin(msg.author)
+					if msg.author.id in self.rawInputUsers:
+						raise CommandError("you are already in raw input mode")
+					if msg.author.id in self.keyInputUsers:
+						raise CommandError("you are already in key input mode")
+					self.rawInputUsers.add(msg.author.id)
+				case "$rawoff":
+					if msg.author.id not in self.rawInputUsers:
+						raise CommandError("you are not in raw input mode")
+					self.rawInputUsers.remove(msg.author.id)
+				case _:
+					if msg.author.id in self.rawInputUsers:
+						await self.send_raw(msg, msg.content.split("\n"))
 						return
+					if msg.author.id in self.keyInputUsers:
+						await self.send_keys(msg, msg.content)
+						return
+
+					if msg.content.startswith("$"):
+						raise CommandError(f"unknown command {cmd}")
+					return
 
 			await msg.add_reaction("\N{WHITE HEAVY CHECK MARK}")
 		except Exception as err:
@@ -208,8 +232,80 @@ class Client(discord.Client):
 
 	async def on_error(self, event, msg, *args, **kwargs):
 		(ty, err, _) = sys.exc_info()
-		await msg.reply(f":boom: `{ty.__name__}: {err}` :boom:")
-		traceback.print_exception(err)
+		match err:
+			case CommandError():
+				await msg.reply(err.msg)
+			case SerialError():
+				rest = "" if not err.rest else f"\n{rest=}"
+				await msg.reply(f"serial error: {err.ty}{rest}")
+			case _:
+				traceback.print_exception(err)
+				await msg.reply(f":boom: `{ty.__name__}: {err}` :boom:")
+
+	async def send_raw(self, msg: discord.Message, lines: list[str]):
+		enforce_is_admin(msg.author)
+		async with SerialGuard(msg):
+			responses = [f"```{await serialClient.send_raw(line)}```" for line in lines]
+			await msg.reply("\n".join(responses))
+
+	async def send_keys(self, msg: discord.Message, keys: str):
+		async with SerialGuard(msg):
+			keys = keys.replace("\n", "").replace(" ", "").upper()
+			await serialClient.send_keys(keys.encode("ascii"))
+
+			# TODO: parse exprs like `F+P`/`F++PP` (more plus holds down for more subsequent keys)
+			""" unknown = set()
+			for key in msg.content:
+				key = ord(key)
+				try:
+					assert key < 128
+					await serialClient.send_key(key)
+				except Exception as e:
+					unknown.add(key)
+			if len(unknown) > 0:
+				unknown = list(unknown)
+				unknown.sort()
+				await msg.reply(f"unknown keys: {", ".join(map(chr, unknown))}") """
+
+class CommandError(Exception):
+	def __init__(self, msg: str):
+		self.msg = msg
+
+def is_admin(user: discord.User):
+	return user.id in config["admin_ids"]
+
+def enforce_is_admin(user: discord.User):
+	if not is_admin(user):
+		raise CommandError("you do not have permission")
+
+def replace_special_chars(str: str) -> str:
+	return (str
+		.replace("\x10", "\N{UPWARDS ARROW}")
+		.replace("\x11", "\N{DOWNWARDS ARROW}")
+	)
+
+def walk_ids(count, head, tail):
+	ids = []
+	match count:
+		case 0:
+			pass
+		case 1:
+			ids.append(head)
+		case 2:
+			ids.extend([head, tail])
+		case _:
+			ids.extend([head, tail])
+			count -= 2
+			for x in range(count):
+				ids.append(tail - (x + 1))
+	ids.sort()
+	return ids
+
+class SerialError(Exception):
+	def __init__(self, ty, msg, *rest):
+		self.ty = ty
+		self.msg = msg
+		self.rest = rest
 
 class SerialGuard:
 	lock = asyncio.Lock()
@@ -245,7 +341,7 @@ class SerialProtocol:
 			write_timeout=0,
 		)
 
-	def read_line(self):
+	def read_line(self) -> bytes:
 		res = bytes()
 		while True:
 			read = self.serial.read(1)
@@ -258,7 +354,17 @@ class SerialProtocol:
 				break
 		# print(f"read  {res!r}")
 		res = res.strip()
-		return res
+		match res.split(b","):
+			case [b"ERR", *rest]:
+				raise SerialError("command error", rest)
+			case [b"NG", *rest]:
+				raise SerialError("invalid state for command", rest)
+			case [b"FER", *rest]:
+				raise SerialError("framing error", rest)
+			case [b"ORER", *rest]:
+				raise SerialError("overrun error", rest)
+			case _:
+				return res
 
 	def write_line(self, line: bytes):
 		assert type(line) is bytes, "type error"
@@ -297,8 +403,8 @@ def main():
 	with open("config.json", "r") as f:
 		config = f.read().strip()
 		config = json.loads(config)
-	for k in ["voice_channel", "admin_id"]:
-		config[k] = int(config[k])
+	for k in ["control_channels", "admin_ids"]:
+		config[k] = list(map(int, config[k]))
 
 	serialClient = SerialProtocol()
 
