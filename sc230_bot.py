@@ -13,6 +13,12 @@ import traceback
 import discord
 import serial
 
+LOCKED_EMOJI = "\N{LOCK}"
+UNLOCKED_EMOJI = "\N{BLACK RIGHT-POINTING TRIANGLE}\uFE0F"
+
+COMMAND_HANDLED_EMOJI = "\N{WHITE HEAVY CHECK MARK}"
+COMAMND_FAILED_EMOJI = "\N{CROSS MARK}"
+
 logger = logging.getLogger(os.path.splitext(os.path.basename(__file__))[0])
 
 class Client(discord.Client):
@@ -210,7 +216,7 @@ class Client(discord.Client):
 							locked = locked != "0"
 							[groupHead, groupTail] = map(int, [groupHead, groupTail])
 
-							locked = "\N{LOCK}" if locked else "\N{OPEN LOCK}"
+							locked = LOCKED_EMOJI if locked else UNLOCKED_EMOJI
 							embed = discord.Embed(title=f"{systemId} - {systemName}{locked}")
 							systems.append(embed)
 
@@ -223,7 +229,7 @@ class Client(discord.Client):
 								locked = locked != "0"
 								[chanHead, chanTail] = map(int, [chanHead, chanTail])
 
-								locked = "\N{LOCK}" if locked else "\N{OPEN LOCK}"
+								locked = LOCKED_EMOJI if locked else UNLOCKED_EMOJI
 								embed.add_field(name=f"{groupId} - {groupName} {locked}", value="", inline=False)
 
 								channels = []
@@ -232,7 +238,7 @@ class Client(discord.Client):
 
 									(_, name, freq, _, _, _, _, locked, *_) = (await serialClient.send_raw(f"CIN,{channelId}")).split(",")
 									locked = locked != "0"
-									locked = "\N{LOCK}" if locked else "\N{OPEN LOCK}"
+									locked = LOCKED_EMOJI if locked else UNLOCKED_EMOJI
 									formatted = serialClient.format_channel(channelId, name, freq)
 									channels.append(f"{formatted} {locked}")
 								if not channels:
@@ -589,9 +595,9 @@ class Client(discord.Client):
 						return
 					return
 
-			await msg.add_reaction("\N{WHITE HEAVY CHECK MARK}")
+			await msg.add_reaction(COMMAND_HANDLED_EMOJI)
 		except Exception as err:
-			await msg.add_reaction("\N{CROSS MARK}")
+			await msg.add_reaction(COMAMND_FAILED_EMOJI)
 			raise err
 
 	async def on_error(self, event, msg = None, *args, **kwargs):
@@ -705,10 +711,10 @@ def enforce_is_admin(user: discord.User):
 		raise CommandError("you do not have permission")
 
 def replace_special_chars(str: str) -> str:
-	return (str
-		.replace("\x10", "\N{UPWARDS ARROW}")
-		.replace("\x11", "\N{DOWNWARDS ARROW}")
-	)
+	return str.translate({
+		"\x10": "\N{UPWARDS ARROW}",
+		"\x11": "\N{DOWNWARDS ARROW}",
+	})
 
 def parse_bool(str: str) -> bool:
 	match str.lower():
