@@ -1,11 +1,13 @@
 import asyncio
 import collections
+from collections.abc import Callable
 import glob
 import itertools
 import json
 import logging
 import os
 import sys
+import time
 import traceback
 
 import discord
@@ -187,11 +189,23 @@ class Client(discord.Client):
 							await serialClient.send_raw(f"CSG,{state}")
 						await serialClient.send_keys("F+S.>E")
 				case "$tree":
-					async with SerialGuard(msg, typing=True), ProgramGuard():
-						systems = []
+					doneSystems = 0
+					doneGroups = 0
+					doneChannels = 0
+					def format_status():
+						return dict(content=(
+							f"read {doneSystems} systems, " +
+							f"{doneGroups} groups, " +
+							f"{doneChannels} channels"
+						))
+
+					systems = []
+					async with SerialGuard(msg, typing=True), ProgramGuard(), StatusGuard(msg, format_status, interval=2.5):
 						systemHead = int((await serialClient.send_raw(b"SIH")).split(",")[1])
 						systemTail = int((await serialClient.send_raw(b"SIT")).split(",")[1])
 						for systemId in await walk_ids(systemHead, systemTail):
+							doneSystems += 1
+
 							(_, _, systemName, _, _, locked, _, _, _, _, _, _, groupHead, groupTail, _) = (await serialClient.send_raw(f"SIN,{systemId}")).split(",")
 							locked = locked != "0"
 							[groupHead, groupTail] = map(int, [groupHead, groupTail])
@@ -203,6 +217,7 @@ class Client(discord.Client):
 							noGroups = True
 							for groupId in await walk_ids(groupHead, groupTail):
 								noGroups = False
+								doneGroups += 1
 
 								(_, _, groupName, _, locked, _, _, _, chanHead, chanTail, _) = (await serialClient.send_raw(f"GIN,{groupId}")).split(",")
 								locked = locked != "0"
@@ -213,10 +228,13 @@ class Client(discord.Client):
 
 								channels = []
 								for channelId in await walk_ids(chanHead, chanTail):
+									doneChannels += 1
+
 									(_, name, freq, _, _, _, _, locked, *_) = (await serialClient.send_raw(f"CIN,{channelId}")).split(",")
 									locked = locked != "0"
 									locked = "\N{LOCK}" if locked else "\N{OPEN LOCK}"
-									channels.append(f"{serialClient.format_channel(channelId, name, freq)} {locked}")
+									formatted = serialClient.format_channel(channelId, name, freq)
+									channels.append(f"{formatted} {locked}")
 								if not channels:
 									embed.add_field(name="", value="no channels")
 									continue
@@ -233,11 +251,11 @@ class Client(discord.Client):
 								embed.add_field(name="", value="\n".join(col2))
 							if noGroups:
 								embed.add_field(name="", value="no groups")
-						if not systems:
-							await msg.reply("no systems")
-						for batch in itertools.batched(systems, 10):
-							await msg.reply(embeds=batch)
-						return
+					if not systems:
+						await msg.reply("no systems")
+					for batch in itertools.batched(systems, 10):
+						await msg.reply(embeds=batch)
+					return
 				case "$locked":
 					raise CommandError("fixme")
 					async with SerialGuard(msg), ProgramGuard():
@@ -432,7 +450,11 @@ class Client(discord.Client):
 					if not frequencies:
 						raise CommandError("you must specify at least one frequency")
 
-					async with SerialGuard(msg, typing=True), ProgramGuard():
+					processedFreqs = 0
+					def format_status():
+						return dict(content=f"{processedFreqs}/{len(frequencies)} processed")
+
+					async with SerialGuard(msg, typing=True), ProgramGuard(), StatusGuard(msg, format_status):
 						errors = []
 						for freq in frequencies:
 							name = ""
@@ -461,13 +483,14 @@ class Client(discord.Client):
 								freq = serialClient.parse_frequency(err.freq)
 								errors.append(f"{freq}: {err.msg}")
 								await serialClient.send_raw(f"DCH,{id}")
+							processedFreqs += 1
 
 						numErrors = len(errors)
 						if errors:
 							errors = f"\n{"\n".join(errors)}"
 						else:
 							errors = ""
-						await msg.reply(f"created {len(frequencies) - numErrors} new channels{errors}")
+						await msg.reply(f"created {len(frequencies) - numErrors} new channels out of {len(frequencies)} given{errors}")
 						return
 				case "$chandel":
 					args = " ".join(args).split()
@@ -511,20 +534,30 @@ class Client(discord.Client):
 					# should be enforced above but just to be safe
 					assert msg.channel.id in config["control_channels"]
 
-					async with msg.channel.typing():
+					messagesSwept = 0
+					def format_status():
+						return dict(content=f"{messagesSwept} messages swept", delete_after=5)
+					statusGuard = StatusGuard(msg, format_status)
+
+					async with statusGuard, msg.channel.typing():
 						queue = []
 						async for msg in msg.channel.history(limit=None):
-							if msg.pinned: continue
+							if msg.pinned or (statusGuard.statusMsg and msg.id == statusGuard.statusMsg.id):
+								continue
 							queue.append(msg)
 							if len(queue) >= 100:
 								await msg.channel.delete_messages(queue)
+								messagesSwept += len(queue)
 								queue.clear()
 						if len(queue) > 0:
 							await msg.channel.delete_messages(queue)
+							messagesSwept += len(queue)
+						await msg.reply("done", delete_after=5)
 						return
 				case "$raw":
 					enforce_is_admin(msg.author)
 					await self.send_raw(msg, " ".join(args).split("\n"))
+					return
 				case "$rawon":
 					enforce_is_admin(msg.author)
 					if msg.author.id in self.rawInputUsers:
@@ -620,6 +653,44 @@ class Peekable:
 			except StopIteration:
 				return None
 		return self.queue[n]
+
+class StatusGuard:
+	def __init__(self, msg: discord.Message, format: Callable[[], dict[str, str]], interval: float = 1):
+		self.msg = msg
+		self.format = format
+		self.interval = interval
+		self.task = None
+		self.statusMsg: discord.Message = None
+
+	async def __aenter__(self):
+		self.task = asyncio.create_task(self.task_func())
+
+	async def __aexit__(self, *_):
+		if self.task:
+			self.task.cancel()
+			try:
+				await self.task
+			except asyncio.CancelledError:
+				pass
+			except:
+				logger.exception("StatusGuard task failed")
+
+	async def task_func(self):
+		kwargs = self.format()
+		kwargs.pop("delete_after", None)
+		self.statusMsg = await self.msg.reply(**kwargs)
+		try:
+			while True:
+				await asyncio.sleep(self.interval)
+				kwargs = self.format()
+				kwargs.pop("delete_after", None)
+				await self.statusMsg.edit(**kwargs)
+		finally:
+			kwargs = self.format()
+			if "delete_after" in kwargs:
+				await self.statusMsg.edit(**kwargs)
+			else:
+				await self.statusMsg.delete()
 
 class CommandError(Exception):
 	def __init__(self, msg: str, **kwargs):
