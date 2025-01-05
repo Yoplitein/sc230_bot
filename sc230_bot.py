@@ -321,8 +321,11 @@ class Client(discord.Client):
 						else:
 							await msg.reply("no systems found")
 				case "$systemadd":
+					name = " ".join(args)
 					async with SerialGuard(msg), ProgramGuard():
 						[_, id] = (await serialClient.send_raw(b"CSY,CNV")).split(",")
+						if name:
+							await serialClient.send_raw(f"SIN,{id},{name},,,,,,,")
 						await msg.reply(f"created new system with id {id}")
 						return
 				case "$systemdel":
@@ -361,8 +364,11 @@ class Client(discord.Client):
 							await msg.reply("no groups found")
 				case "$groupadd":
 					systemId = int(args[0])
+					name = " ".join(args[1:])
 					async with SerialGuard(msg), ProgramGuard():
 						[_, id] = (await serialClient.send_raw(f"AGC,{systemId}")).split(",")
+						if name:
+							await serialClient.send_raw(f"GIN,{id},{name},,")
 						await msg.reply(f"created new group with id {id}")
 						return
 				case "$groupdel":
@@ -411,17 +417,37 @@ class Client(discord.Client):
 						else:
 							await msg.reply("no channels found")
 				case "$chanadd":
+					args = " ".join(args).split(maxsplit=1)
 					groupId = int(args[0])
-					frequencies = list(map(serialClient.format_frequency, " ".join(args[1:]).split()))
+					frequencies = []
+					for line in args[1].split("\n"):
+						line = line.split(maxsplit=1)
+						freq = serialClient.format_frequency(line[0])
+						name = line[1:]
+						if name:
+							name = serialClient.sanitize_string(name[0])
+							frequencies.append((freq, name))
+						else:
+							frequencies.append(freq)
 					if not frequencies:
 						raise CommandError("you must specify at least one frequency")
-					logger.debug(f"{frequencies=}")
 					async with SerialGuard(msg), ProgramGuard():
 						errors = []
 						for freq in frequencies:
+							name = ""
+							match freq:
+								case str(f):
+									pass
+								case (f, n):
+									freq = f
+									name = n
+								case _:
+									assert False, "unexpected case"
+
 							[_, id] = (await serialClient.send_raw(f"ACC,{groupId}")).split(",")
 							try:
-								match (await serialClient.send_raw(f"CIN,{id},,{freq},,,,,,,,")).split(","):
+
+								match (await serialClient.send_raw(f"CIN,{id},{name},{freq},,,,,,,,")).split(","):
 									case ["CIN", "OK"]:
 										pass
 									case ["CIN", "ERR"]:
@@ -435,6 +461,7 @@ class Client(discord.Client):
 								freq = serialClient.parse_frequency(err.freq)
 								errors.append(f"{freq}: {err.msg}")
 								await serialClient.send_raw(f"DCH,{id}")
+
 						numErrors = len(errors)
 						if errors:
 							errors = f"\n{"\n".join(errors)}"
@@ -443,9 +470,11 @@ class Client(discord.Client):
 						await msg.reply(f"created {len(frequencies) - numErrors} new channels{errors}")
 						return
 				case "$chandel":
-					id = int(args[0])
+					args = " ".join(args).split()
 					async with SerialGuard(msg), ProgramGuard():
-						await serialClient.send_raw(f"DCH,{id}")
+						for id in args:
+							id = int(id)
+							await serialClient.send_raw(f"DCH,{id}")
 				case "$channame":
 					[id, *newName] = args
 					id = int(id)

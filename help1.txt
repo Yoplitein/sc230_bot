@@ -29,8 +29,8 @@
   * print all systems, their groups, and channels
 * `$systems`
   * list systems and their IDs
-* `$systemadd`
-  * add a new system
+* `$systemadd [name]`
+  * add a new system, optionally setting its name
 * `$systemdel <system id>`
   * delete a system
 * `$systemname <system id> <name>`
@@ -39,8 +39,8 @@
   * set a system's lockout status
 * `$groups <system id>`
   * list groups and IDs for the given system
-* `$groupadd <system id>`
-  * add a new group to a system
+* `$groupadd <system id> [name]`
+  * add a new group to a system, optionally setting its name
 * `$groupdel <group id>`
   * delete a group
 * `$groupname <group id> <name>`

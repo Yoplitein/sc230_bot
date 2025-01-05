@@ -1,7 +1,8 @@
 * `$channels <group id>`
   * list channels in a given group
-* `$chanadd <group id>`
-  * add a new channel to a group
+* `$chanadd <group id> <freq spec...>`
+  * add new channels (frequencies) to a group
+  * each frequency on one line, optionally followed by a name
 * `$chandel <channel id>`
   * delete a channel
 * `$channame <channel id> <name>`
@@ -19,8 +20,8 @@
 * `$raw <body>` / `$rawon` / `$rawoff`
   * admin only. allows transmitting raw protocol data
   * `$rawon`/`$rawoff` like keycode commands treats all messages as protocol data
-* `$hardclear`
-  * admin only. factory reset
+* `$factoryreset`
+  * admin only. restores all settings to factory defaults
 * `$restart`
   * admin only. restarts bot
 
