@@ -217,7 +217,7 @@ class Client(discord.Client):
 							[groupHead, groupTail] = map(int, [groupHead, groupTail])
 
 							locked = LOCKED_EMOJI if locked else UNLOCKED_EMOJI
-							embed = discord.Embed(title=f"{systemId} - {systemName}{locked}")
+							embed = discord.Embed(title=f"{systemId} - {systemName} {locked}")
 							systems.append(embed)
 
 							noGroups = True
@@ -237,10 +237,8 @@ class Client(discord.Client):
 									doneChannels += 1
 
 									(_, name, freq, _, _, _, _, locked, *_) = (await serialClient.send_raw(f"CIN,{channelId}")).split(",")
-									locked = locked != "0"
-									locked = LOCKED_EMOJI if locked else UNLOCKED_EMOJI
-									formatted = serialClient.format_channel(channelId, name, freq)
-									channels.append(f"{formatted} {locked}")
+									formatted = serialClient.format_channel(channelId, name, freq, locked)
+									channels.append(f"{formatted}")
 								if not channels:
 									embed.add_field(name="", value="no channels")
 									continue
@@ -336,8 +334,9 @@ class Client(discord.Client):
 						systems = []
 						for id in await walk_ids(head, tail):
 							match (await serialClient.send_raw(f"SIN,{id}")).split(","):
-								case ["SIN", _, name, *_]:
-									systems.append(f"* {id} - {name}")
+								case ["SIN", _, name, _, _, locked, *_]:
+									locked = LOCKED_EMOJI if locked != "0" else UNLOCKED_EMOJI
+									systems.append(f"* {id} - {name} {locked}")
 								case resp:
 									logger.warning(f"weird response for system {id}: {resp!r}")
 						if systems:
@@ -348,6 +347,8 @@ class Client(discord.Client):
 					name = " ".join(args)
 					async with SerialGuard(msg), ProgramGuard():
 						[_, id] = (await serialClient.send_raw(b"CSY,CNV")).split(",")
+						if id == "-1":
+							raise CommandError("could not create system")
 						if name:
 							await serialClient.send_raw(f"SIN,{id},{name},,,,,,,")
 						await msg.reply(f"created new system with id {id}")
@@ -377,8 +378,9 @@ class Client(discord.Client):
 						groups = []
 						for id in await walk_ids(head, tail):
 							match (await serialClient.send_raw(f"GIN,{id}")).split(","):
-								case ["GIN", _, name, *_]:
-									groups.append(f"* {id} - {name}")
+								case ["GIN", _, name, _, locked, *_]:
+									locked = LOCKED_EMOJI if locked != "0" else UNLOCKED_EMOJI
+									groups.append(f"* {id} - {name} {locked}")
 								case resp:
 									logger.debug(f"weird response for group {id}: {resp!r}")
 						if groups:
@@ -390,7 +392,11 @@ class Client(discord.Client):
 					systemId = int(args[0])
 					name = " ".join(args[1:])
 					async with SerialGuard(msg), ProgramGuard():
+						if (await serialClient.send_raw(f"SIN,{systemId}")).split(",", 1)[1] == "ERR":
+							raise CommandError(f"system {systemId} does not exist")
 						[_, id] = (await serialClient.send_raw(f"AGC,{systemId}")).split(",")
+						if id == "-1":
+							raise CommandError("could not create group")
 						if name:
 							await serialClient.send_raw(f"GIN,{id},{name},,")
 						await msg.reply(f"created new group with id {id}")
@@ -420,8 +426,8 @@ class Client(discord.Client):
 						channels = []
 						for id in await walk_ids(head, tail):
 							match (await serialClient.send_raw(f"CIN,{id}")).split(","):
-								case ["CIN", name, freq, *_]:
-									channels.append(serialClient.format_channel(id, name, freq))
+								case ["CIN", name, freq, _, _, _, _, locked, *_]:
+									channels.append(serialClient.format_channel(id, name, freq, locked))
 								case resp:
 									logger.debug(f"weird response for channel {id}: {resp!r}")
 						if channels:
@@ -473,7 +479,11 @@ class Client(discord.Client):
 								case _:
 									assert False, "unexpected case"
 
+							if (await serialClient.send_raw(f"GIN,{groupId}")).split(",", 1)[1] == "ERR":
+								raise CommandError(f"group {groupId} does not exist")
 							[_, id] = (await serialClient.send_raw(f"ACC,{groupId}")).split(",")
+							if id == "-1":
+								raise CommandError("could not create channel")
 							try:
 								match (await serialClient.send_raw(f"CIN,{id},{name},{freq},,,,,,,,")).split(","):
 									case ["CIN", "OK"]:
@@ -575,7 +585,7 @@ class Client(discord.Client):
 					if msg.author.id not in self.rawInputUsers:
 						raise CommandError("you are not in raw input mode")
 					self.rawInputUsers.remove(msg.author.id)
-				case "$hardclear":
+				case "$factoryreset":
 					enforce_is_admin(msg.author)
 					async with SerialGuard(msg, typing=True), ProgramGuard():
 						await serialClient.send_raw(b"CLR")
@@ -912,13 +922,16 @@ class SerialProtocol:
 			raise
 
 	@staticmethod
-	def format_channel(id, name, freq):
+	def format_channel(id, name, freq, locked = None):
 		freq = serialClient.parse_frequency(freq)
 		if name.endswith("MHz"):
 			name = ""
 		else:
 			name = f" ({name})"
-		return f"{id} - {freq}{name}"
+		if locked != None:
+			locked = LOCKED_EMOJI if locked != "0" else UNLOCKED_EMOJI
+			locked = " " + locked
+		return f"{id} - {freq}{name}{locked}"
 
 	@staticmethod
 	def format_frequency(freq: str) -> str:
