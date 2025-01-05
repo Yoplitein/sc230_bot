@@ -169,7 +169,7 @@ class Client(discord.Client):
 						"Public": ("806", "956"),
 						"GHz ham": ("1240", "1300")
 					}
-					async with SerialGuard(msg):
+					async with SerialGuard(msg, typing=True):
 						async with ProgramGuard():
 							enabled = ""
 							for (group, (name, (minfreq, maxfreq))) in enumerate(bands.items()):
@@ -187,7 +187,7 @@ class Client(discord.Client):
 							await serialClient.send_raw(f"CSG,{state}")
 						await serialClient.send_keys("F+S.>E")
 				case "$tree":
-					async with SerialGuard(msg), ProgramGuard():
+					async with SerialGuard(msg, typing=True), ProgramGuard():
 						systems = []
 						systemHead = int((await serialClient.send_raw(b"SIH")).split(",")[1])
 						systemTail = int((await serialClient.send_raw(b"SIT")).split(",")[1])
@@ -281,7 +281,7 @@ class Client(discord.Client):
 							errs = f", {errs} out of band"
 						await msg.reply(f"locked {locked} freqs{errs}")
 				case "$unlockall":
-					async with SerialGuard(msg), ProgramGuard():
+					async with SerialGuard(msg, typing=True), ProgramGuard():
 						while True:
 							match (await serialClient.send_raw(b"GLF")).split(","):
 								case ["GLF", "-1"]:
@@ -431,7 +431,8 @@ class Client(discord.Client):
 							frequencies.append(freq)
 					if not frequencies:
 						raise CommandError("you must specify at least one frequency")
-					async with SerialGuard(msg), ProgramGuard():
+
+					async with SerialGuard(msg, typing=True), ProgramGuard():
 						errors = []
 						for freq in frequencies:
 							name = ""
@@ -446,7 +447,6 @@ class Client(discord.Client):
 
 							[_, id] = (await serialClient.send_raw(f"ACC,{groupId}")).split(",")
 							try:
-
 								match (await serialClient.send_raw(f"CIN,{id},{name},{freq},,,,,,,,")).split(","):
 									case ["CIN", "OK"]:
 										pass
@@ -511,16 +511,17 @@ class Client(discord.Client):
 					# should be enforced above but just to be safe
 					assert msg.channel.id in config["control_channels"]
 
-					queue = []
-					async for msg in msg.channel.history(limit=None):
-						if msg.pinned: continue
-						queue.append(msg)
-						if len(queue) >= 100:
+					async with msg.channel.typing():
+						queue = []
+						async for msg in msg.channel.history(limit=None):
+							if msg.pinned: continue
+							queue.append(msg)
+							if len(queue) >= 100:
+								await msg.channel.delete_messages(queue)
+								queue.clear()
+						if len(queue) > 0:
 							await msg.channel.delete_messages(queue)
-							queue.clear()
-					if len(queue) > 0:
-						await msg.channel.delete_messages(queue)
-					return
+						return
 				case "$raw":
 					enforce_is_admin(msg.author)
 					await self.send_raw(msg, " ".join(args).split("\n"))
@@ -537,7 +538,7 @@ class Client(discord.Client):
 					self.rawInputUsers.remove(msg.author.id)
 				case "$hardclear":
 					enforce_is_admin(msg.author)
-					async with SerialGuard(msg), ProgramGuard():
+					async with SerialGuard(msg, typing=True), ProgramGuard():
 						await serialClient.send_raw(b"CLR")
 				case "$restart":
 					enforce_is_admin(msg.author)
@@ -673,19 +674,26 @@ class SerialError(Exception):
 class SerialGuard:
 	lock = asyncio.Lock()
 
-	def __init__(self, msg: discord.Message):
+	def __init__(self, msg: discord.Message, typing: bool = False):
 		self.msg = msg
 		self.pendingMsg = None
+		self.typing = None
+		if typing:
+			self.typing = msg.channel.typing()
 
 	async def __aenter__(self):
 		if self.lock.locked():
 			self.pendingMsg = await self.msg.reply("waiting for other command(s) to finish")
+		if self.typing:
+			await self.typing.__aenter__()
 		await self.lock.acquire()
 		logger.debug(f"serial locked for author={self.msg.author.name!r} content={self.msg.content!r}")
 
 	async def __aexit__(self, *_):
 		logger.debug("serial unlocked")
 		self.lock.release()
+		if self.typing:
+			await self.typing.__aexit__(*_)
 		if self.pendingMsg:
 			await self.pendingMsg.delete()
 
