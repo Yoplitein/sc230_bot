@@ -36,7 +36,12 @@ class Client(discord.Client):
 			self.loop.add_reader(inotify, on_readable)
 
 	async def on_message(self, msg: discord.Message):
-		if msg.author == self.user or msg.channel.id not in config["control_channels"]:
+		shouldIgnoreMessage = (
+			msg.author == self.user or # bot parsing its own messages
+			not msg.content or # stickers, etc
+			msg.channel.id not in config["control_channels"]
+		)
+		if shouldIgnoreMessage:
 			return
 
 		try:
