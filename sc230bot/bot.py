@@ -1,4 +1,5 @@
 import asyncio
+import collections
 import sys
 from typing import Callable, override
 import os
@@ -41,9 +42,29 @@ class Sc230Bot(commands.Bot):
 
 	async def setup_hook(self):
 		if "--auto-restart" in sys.argv:
+			from pathlib import Path
 			from inotify_simple import INotify, flags
+
+			root = Path(__file__).parent
+			assert root.is_dir()
+			dirs = []
+			queue = collections.deque([root])
+			while queue:
+				head = queue.popleft()
+				dirs.append(head)
+				for dir in head.iterdir():
+					if dir.name == "__pycache__":
+						continue
+					if dir.is_dir():
+						queue.append(dir)
+			pwd = os.path.abspath(".")
+			dirs = [dir.relative_to(pwd) for dir in dirs]
+
 			inotify = INotify()
-			inotify.add_watch(os.path.dirname(__file__), flags.CLOSE_WRITE)
+			for dir in dirs:
+				logger.debug(f"auto restart watching `{dir}`")
+				inotify.add_watch(dir, flags.CLOSE_WRITE)
+
 			def on_readable():
 				file = inotify.read()[0].name
 				logger.info(f"{file} modified, restarting")
