@@ -43,9 +43,10 @@ class Sc230Bot(commands.Bot):
 		if "--auto-restart" in sys.argv:
 			from inotify_simple import INotify, flags
 			inotify = INotify()
-			inotify.add_watch(__file__, flags.CLOSE_WRITE)
-			def on_readable(*args, **kwargs):
-				logger.info(f"{os.path.basename(__file__)} modified, restarting")
+			inotify.add_watch(os.path.dirname(__file__), flags.CLOSE_WRITE)
+			def on_readable():
+				file = inotify.read()[0].name
+				logger.info(f"{file} modified, restarting")
 				raise SystemExit
 			self.loop.add_reader(inotify, on_readable)
 
