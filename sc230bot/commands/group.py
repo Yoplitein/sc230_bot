@@ -3,7 +3,7 @@ import discord
 from . import logger
 from .. import config, serial, getLogger, UNLOCKED_EMOJI, LOCKED_EMOJI, category
 from ..serial import ProgramGuard, SerialError, SerialGuard, walk_ids
-from ..bot import Sc230Context, CommandError, NoSubcommandError, CommandHandled, StatusGuard, enforce_is_admin, bot
+from ..bot import Sc230Context, CommandError, BadSubcommandError, CommandHandled, StatusGuard, enforce_is_admin, bot
 
 @category("programming")
 @bot.group(invoke_without_command=True, aliases=["groups", "g"])
@@ -15,7 +15,7 @@ async def group(_, ctx: Sc230Context):
 
 		the device has a limit of 20 groups per system
 	"""
-	raise NoSubcommandError
+	raise BadSubcommandError(ctx)
 
 @group.command(name="list", ignore_extra=False, aliases=["ls"])
 async def list_(ctx: Sc230Context, systemId: int):

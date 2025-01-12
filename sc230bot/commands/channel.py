@@ -3,7 +3,7 @@ import discord
 from . import logger
 from .. import config, serial, getLogger, UNLOCKED_EMOJI, LOCKED_EMOJI, category
 from ..serial import ProgramGuard, SerialError, SerialGuard, walk_ids
-from ..bot import Sc230Context, CommandError, NoSubcommandError, CommandHandled, StatusGuard, enforce_is_admin, bot
+from ..bot import Sc230Context, CommandError, BadSubcommandError, CommandHandled, StatusGuard, enforce_is_admin, bot
 
 @category("programming")
 @bot.group(invoke_without_command=True, aliases=["channels", "chan", "chans", "c"])
@@ -16,7 +16,7 @@ async def channel(_, ctx: Sc230Context):
 
 		the device has a limit of 2500 channels per group
 	"""
-	raise NoSubcommandError
+	raise BadSubcommandError(ctx)
 
 @channel.command(name="list", ignore_extra=False, aliases=["ls"])
 async def list_(ctx: Sc230Context, groupId: int):

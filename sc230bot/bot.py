@@ -128,8 +128,14 @@ class CommandError(Exception):
 		self.msg = msg
 		self.__dict__.update(kwargs)
 
-class NoSubcommandError(Exception):
-	pass
+class BadSubcommandError(Exception):
+	def __init__(self, ctx: Sc230Context):
+		if ctx.view.eof:
+			self.msg = "no subcommand given"
+		else:
+			ctx.view.skip_ws()
+			name = ctx.view.get_word()
+			self.msg = f"unknown subcommand `{name}`"
 
 class CommandHandled(Exception):
 	pass
@@ -192,11 +198,20 @@ async def on_command_error(ctx: Sc230Context, err: BaseException):
 					return
 				case RestartProcess():
 					raise err
-				case NoSubcommandError():
-					import pdb;
-					subcommands = ctx.command.all_commands.keys()
+				case BadSubcommandError():
+					subcommands = {
+						ctx.command.all_commands.get(name)
+						for name in ctx.command.all_commands.keys()
+					}
+					subcommands = {cmd.name:cmd for cmd in subcommands}
+					subcommands = [
+						[name] + cmd.aliases
+						for (name, cmd) in subcommands.items()
+					]
+					subcommands = ["/".join(names) for names in subcommands]
+					subcommands.sort()
 					subcommands = "\n".join(f"* {name}" for name in subcommands)
-					await ctx.reply(f"no subcommand given, expected one of:\n```\n{subcommands}\n```")
+					await ctx.reply(f"{err.msg}, expected one of:\n```\n{subcommands}\n```")
 				case _:
 					logger.exception("unhandled command invoke error", exc_info=err)
 					cause = ""

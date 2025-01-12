@@ -2,7 +2,7 @@ import discord
 
 from . import logger
 from .. import config, serial, getLogger, UNLOCKED_EMOJI, LOCKED_EMOJI, category
-from ..bot import Sc230Context, CommandError, NoSubcommandError, CommandHandled, StatusGuard, enforce_is_admin, bot
+from ..bot import Sc230Context, CommandError, BadSubcommandError, CommandHandled, StatusGuard, enforce_is_admin, bot
 from ..serial import ProgramGuard, SerialError, SerialGuard, walk_ids
 
 @category("scanning")
@@ -28,7 +28,7 @@ async def customsearch(_, ctx: Sc230Context):
 	"""
 		scanning mode where up to ten frequency ranges are probed simultaneously
 	"""
-	raise NoSubcommandError
+	raise BadSubcommandError(ctx)
 
 @customsearch.command(ignore_extra=False)
 async def scan(ctx: Sc230Context, *, groups: str = "0123456789"):

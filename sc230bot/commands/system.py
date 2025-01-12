@@ -2,7 +2,7 @@ import discord
 
 from . import logger
 from .. import config, serial, getLogger, UNLOCKED_EMOJI, LOCKED_EMOJI, category
-from ..bot import Sc230Context, CommandError, NoSubcommandError, CommandHandled, StatusGuard, enforce_is_admin, bot
+from ..bot import Sc230Context, CommandError, BadSubcommandError, CommandHandled, StatusGuard, enforce_is_admin, bot
 from ..serial import ProgramGuard, SerialError, SerialGuard, walk_ids
 
 @category("programming")
@@ -15,7 +15,7 @@ async def system(_, ctx: Sc230Context):
 
 		the device has a limit of 200 systems
 	"""
-	raise NoSubcommandError
+	raise BadSubcommandError(ctx)
 
 @system.command(name="list", ignore_extra=False, aliases=["ls"])
 async def list_(ctx: Sc230Context):
