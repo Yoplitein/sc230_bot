@@ -49,7 +49,7 @@ async def main():
 	try:
 		async with bot:
 			for category in categories.values():
-				logger.debug(f"adding category {category=}")
+				logger.debug(f"adding category {category.__cog_name__}")
 				await bot.add_cog(category)
 			await bot.start(config.get("token"))
 	finally:

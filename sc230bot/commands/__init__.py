@@ -2,6 +2,7 @@ from enum import Enum
 import itertools
 
 import discord
+from discord.ext import commands
 
 from .. import config, serial, getLogger, UNLOCKED_EMOJI, LOCKED_EMOJI, category
 from ..serial import ProgramGuard, SerialError, SerialGuard, walk_ids
@@ -167,25 +168,30 @@ search.help += f"\n\noption must be one of:" + \
 
 @category("scanning")
 @bot.command(ignore_extra=False)
-async def freq(_, ctx: Sc230Context, *, freq: float):
+async def freq(_, ctx: Sc230Context, *, frequency: float):
 	"""
 		tune in to a specific frequency (to nearest 5kHz)
 	"""
-	freq = serial.format_frequency(freq)
+	frequency = serial.format_frequency(frequency)
 	async with SerialGuard(ctx.message):
-		match (await serial.send_raw(f"QSH,{freq},0,AUTO,0,2,0,1,0,0")).split(","):
+		match (await serial.send_raw(f"QSH,{frequency},0,AUTO,0,2,0,1,0,0")).split(","):
 			case ["QSH", "OK"]:
 				pass
-			case ["QSH", "ERR"]:
+			case ["QSH", "ERR" | "NG"]:
 				raise CommandError("couldn't tune in, is the scanner busy?")
 
 @category("locking")
 @bot.command(ignore_extra=False)
-async def lockout(_, ctx: Sc230Context, *frequencies: float):
+async def lockout(_, ctx: Sc230Context, *, frequencies: str):
 	"""
-		lock out specific frequencies
+		globally lock out specific frequencies
+
+		Parameters
+		---
+		frequencies
+			a list of frequencies separated by whitespace
 	"""
-	frequencies = list(map(serial.format_frequency, frequencies))
+	frequencies = list(map(serial.format_frequency, frequencies.split()))
 	async with SerialGuard(ctx.message), ProgramGuard():
 		locked = 0
 		errs = 0

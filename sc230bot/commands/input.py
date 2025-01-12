@@ -1,4 +1,5 @@
 import discord
+from discord.ext import commands
 
 from . import logger
 from .. import config, serial, getLogger, UNLOCKED_EMOJI, LOCKED_EMOJI, category
@@ -61,6 +62,8 @@ async def keyoff(_, ctx: Sc230Context):
 async def raw(_, ctx: Sc230Context, *, input: str):
 	"""
 		admin only. allows transmitting raw protocol data
+
+		see $info for protocol documentation
 	"""
 	enforce_is_admin(ctx.author)
 	await ctx.send_raw(input.split("\n"))
@@ -83,7 +86,7 @@ async def rawon(_, ctx: Sc230Context):
 @bot.command(ignore_extra=False)
 async def rawoff(_, ctx: Sc230Context):
 	"""
-		disable keycode messages mode
+		disable raw protocol messages mode
 	"""
 	if ctx.author.id not in bot.rawInputUsers:
 		raise CommandError("you are not in raw input mode")

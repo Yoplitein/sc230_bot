@@ -1,4 +1,5 @@
 import discord
+from discord.ext import commands
 
 from . import logger
 from .. import config, serial, getLogger, UNLOCKED_EMOJI, LOCKED_EMOJI, category
@@ -7,7 +8,12 @@ from ..serial import ProgramGuard, SerialError, SerialGuard, walk_ids
 
 @category("scanning")
 @bot.command(ignore_extra=False)
-async def freqrange(_, ctx: Sc230Context, minfreq: float, maxfreq: float):
+async def freqrange(
+	_,
+	ctx: Sc230Context,
+	minfreq: float = commands.parameter(displayed_name="min frequency"),
+	maxfreq: float = commands.parameter(displayed_name="max frequency"),
+):
 	"""
 		scan through a range of frequencies
 
@@ -30,10 +36,19 @@ async def customsearch(_, ctx: Sc230Context):
 	"""
 	raise BadSubcommandError(ctx)
 
-@customsearch.command(ignore_extra=False)
-async def scan(ctx: Sc230Context, *, groups: str = "0123456789"):
+@customsearch.command(ignore_extra=False, aliases=["s"])
+async def scan(
+	ctx: Sc230Context,
+	*,
+	groups: str = commands.parameter(default="0123456789", displayed_default="all"),
+):
 	"""
-		switch to custom search mode with the given group IDs enabled, defaults to all
+		switch to custom search mode with the given groups enabled
+
+		Parameters
+		---
+		groups
+			a series of group ids 0-9, optionally separated by whitespace
 	"""
 	groups = groups.replace(" ", "")
 	if not all(v in "0123456789" for v in groups):
@@ -70,9 +85,22 @@ async def list_(ctx: Sc230Context):
 		raise CommandHandled
 
 @customsearch.command(ignore_extra=False, aliases=["freq"])
-async def frequency(ctx: Sc230Context, group: int, minfreq: float, maxfreq: float):
+async def frequency(
+	ctx: Sc230Context,
+	group: int = commands.parameter(displayed_name="group id"),
+	minfreq: float = commands.parameter(displayed_name="min frequency"),
+	maxfreq: float = commands.parameter(displayed_name="max frequency"),
+):
 	"""
 		set custom search group min/max frequencies. note that on group 0 this may be overridden by `$freqrange`
+
+		Parameters
+		---
+		minfreq
+			lowest frequency this search group will scan (inclusive)
+		maxfreq
+			highest frequency this search group will scan (inclusive)
+
 	"""
 	if group < 0 or group > 9:
 		raise CommandError("search groups must be given as numbers 0-9")
@@ -82,9 +110,19 @@ async def frequency(ctx: Sc230Context, group: int, minfreq: float, maxfreq: floa
 		await serial.send_raw(f"CSP,{group},,{minfreq},{maxfreq},,,,,")
 
 @customsearch.command(ignore_extra=False)
-async def name(ctx: Sc230Context, group: int, *, name: str):
+async def name(
+	ctx: Sc230Context,
+	group: int = commands.parameter(displayed_name="group id"),
+	*,
+	name: str,
+):
 	"""
 		set custom search group name
+
+		Parameters
+		---
+		name
+			new name to give the group. limit 16 characters
 	"""
 	if group < 0 or group > 9:
 		raise CommandError("search groups must be given as numbers 0-9")
@@ -99,10 +137,10 @@ allBands = {
 	"Public": ("806", "956"),
 	"GHz ham": ("1240", "1300")
 }
-@customsearch.command(ignore_extra=False)
+@customsearch.command(ignore_extra=False, aliases=["all"])
 async def spectrum(ctx: Sc230Context):
 	"""
-		programs set of search groups covering the hardware's frequency range
+		programs a set of search groups covering the hardware's frequency range, and begins scanning through them
 	"""
 	async with SerialGuard(ctx.message, typing=True):
 		async with ProgramGuard():
