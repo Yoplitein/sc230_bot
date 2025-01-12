@@ -8,12 +8,10 @@ import time
 import discord
 from discord.ext import commands
 
-from . import config, serial, commands as _, getLogger, RestartProcess, logger
+from . import config, commands as _, getLogger, RestartProcess, logger
 from .bot import Sc230Context, bot
 
 async def main():
-	serial.open()
-
 	discord.utils.setup_logging(root = False)
 	consoleHandler = logging.getLogger(discord.__name__).handlers[-1]
 	for logger in getLogger.loggers:

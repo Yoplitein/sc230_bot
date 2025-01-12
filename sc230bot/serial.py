@@ -1,4 +1,5 @@
 import asyncio
+from typing import Optional
 
 import discord
 import serial as pyserial
@@ -31,11 +32,13 @@ class SerialGuard:
 		if self.typing:
 			await self.typing.__aenter__()
 		await self.lock.acquire()
+		open()
 		logger.debug(f"serial locked for author={self.msg.author.name!r} content={self.msg.content!r}")
 
 	async def __aexit__(self, *_):
-		logger.debug("serial unlocked")
+		close()
 		self.lock.release()
+		logger.debug("serial unlocked")
 		if self.typing:
 			await self.typing.__aexit__(*_)
 		if self.pendingMsg:
@@ -58,9 +61,10 @@ class ProgramGuard:
 		if self.level == 0:
 			await send_raw(b"EPG")
 
-serial: pyserial.Serial = None
+serial: Optional[pyserial.Serial] = None
 def open():
 	global serial
+	assert SerialGuard.lock.locked()
 	serial = pyserial.Serial(
 		config.get("serial_port"),
 		baudrate=config.get("serial_baud"),
@@ -73,6 +77,13 @@ def open():
 		timeout=0,
 		write_timeout=0,
 	)
+
+def close():
+	global serial
+	assert SerialGuard.lock.locked()
+	if serial:
+		serial.close()
+	serial = None
 
 def read_line() -> bytes:
 	res = bytes()
