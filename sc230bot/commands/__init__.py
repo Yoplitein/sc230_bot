@@ -249,25 +249,52 @@ async def factoryreset(ctx: Sc230Context):
 		await serial.send_raw(b"CLR")
 
 @bot.command(ignore_extra=False)
-async def sweep(ctx: Sc230Context):
+async def sweep(ctx: Sc230Context, *, all: str = commands.parameter(default=False, displayed_default="false")):
 	"""
-		admin only. delete all messages in the channel \N{BROOM}\N{DASH SYMBOL}
+		admin only. delete all bot-related messages in the channel \N{BROOM}\N{DASH SYMBOL}
+
+		Parameters
+		---
+		all
+			by default only bot messages and those they're in reply to are swept.
+			`$sweep all` instead sweeps all messages
 	"""
 	enforce_is_admin(ctx.author)
 
 	# should be enforced by `on_message` but just to be safe
 	assert ctx.channel.id in config.get("control_channels")
 
+	all = all == "all"
+
 	messagesSwept = 0
 	def format_status(*, last = False):
 		return dict(content=f"{last and "done\n" or ""}{messagesSwept} messages swept", delete_after=5)
 	statusGuard = StatusGuard(ctx, format_status, reply=False)
 
+	repliedTo = set()
+	def shouldDelete(msg: discord.Message):
+		if msg.pinned:
+			return False
+		if msg.id == statusGuard.statusMsg.id:
+			return False
+		if all:
+			return True
+		return (
+			msg.author.id == ctx.bot.user.id or
+			any(react.me for react in msg.reactions) or
+			msg.id in repliedTo
+		)
+
 	async with statusGuard, ctx.channel.typing():
-		queue = []
+		queue = [ctx.message]
 		async for foundMsg in ctx.channel.history(limit=None):
-			if foundMsg.pinned or (statusGuard.statusMsg and foundMsg.id == statusGuard.statusMsg.id):
+			if foundMsg.id == ctx.message.id:
 				continue
+			if not shouldDelete(foundMsg):
+				continue
+			if foundMsg.reference:
+				repliedTo.add(foundMsg.reference.message_id)
+
 			queue.append(foundMsg)
 			if len(queue) >= 100:
 				await ctx.channel.delete_messages(queue)
