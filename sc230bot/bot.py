@@ -1,5 +1,6 @@
 import asyncio
 import collections
+import inspect
 import sys
 from typing import Callable, override
 import os
@@ -118,10 +119,17 @@ class Sc230Context(commands.Context[Sc230Bot]):
 			await serial.send_keys(keys.encode("ascii"))
 
 class StatusGuard:
-	def __init__(self, msg: discord.Message, format: Callable[[], dict[str, str]], interval: float = 1):
-		self.msg = msg
+	def __init__(
+			self,
+			ctx: Sc230Context,
+			format: Callable[[], dict[str, str]],
+			interval: float = 1,
+			reply: bool = True,
+	):
+		self.ctx = ctx
 		self.format = format
 		self.interval = interval
+		self.reply = reply
 		self.task = None
 		self.statusMsg: discord.Message = None
 
@@ -138,18 +146,24 @@ class StatusGuard:
 			except:
 				logger.exception("StatusGuard task failed")
 
+	def getFormat(self, last = False):
+		kwargs = {}
+		if last and "last" in inspect.getfullargspec(self.format).kwonlyargs:
+			kwargs["last"] = True
+		return self.format(**kwargs)
+
 	async def task_func(self):
-		kwargs = self.format()
+		kwargs = self.getFormat()
 		kwargs.pop("delete_after", None)
-		self.statusMsg = await self.msg.reply(**kwargs)
+		self.statusMsg = await self.ctx.send(**kwargs, reference=self.reply and self.ctx.message or None)
 		try:
 			while True:
 				await asyncio.sleep(self.interval)
-				kwargs = self.format()
+				kwargs = self.getFormat()
 				kwargs.pop("delete_after", None)
 				await self.statusMsg.edit(**kwargs)
 		finally:
-			kwargs = self.format()
+			kwargs = self.getFormat(last=True)
 			if "delete_after" in kwargs:
 				await self.statusMsg.edit(**kwargs)
 			else:

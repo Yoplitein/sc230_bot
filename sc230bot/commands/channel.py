@@ -88,7 +88,7 @@ async def add(
 	def format_status():
 		return dict(content=f"{processedFreqs}/{len(frequencies)} processed")
 
-	async with SerialGuard(ctx.message, typing=True), ProgramGuard(), StatusGuard(ctx.message, format_status):
+	async with SerialGuard(ctx.message, typing=True), ProgramGuard(), StatusGuard(ctx, format_status):
 		errors = []
 		for freq in frequencies:
 			name = ""

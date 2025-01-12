@@ -44,7 +44,7 @@ async def tree(_, ctx: Sc230Context):
 		))
 
 	systems = []
-	async with SerialGuard(ctx.message, typing=True), ProgramGuard(), StatusGuard(ctx.message, format_status, interval=2.5):
+	async with SerialGuard(ctx.message, typing=True), ProgramGuard(), StatusGuard(ctx, format_status, interval=2.5):
 		systemHead = int((await serial.send_raw(b"SIH")).split(",")[1])
 		systemTail = int((await serial.send_raw(b"SIT")).split(",")[1])
 		for systemId in await walk_ids(systemHead, systemTail):
@@ -259,9 +259,9 @@ async def sweep(ctx: Sc230Context):
 	assert ctx.channel.id in config.get("control_channels")
 
 	messagesSwept = 0
-	def format_status():
-		return dict(content=f"{messagesSwept} messages swept", delete_after=5)
-	statusGuard = StatusGuard(ctx.message, format_status)
+	def format_status(*, last = False):
+		return dict(content=f"{last and "done\n" or ""}{messagesSwept} messages swept", delete_after=5)
+	statusGuard = StatusGuard(ctx, format_status, reply=False)
 
 	async with statusGuard, ctx.channel.typing():
 		queue = []
@@ -276,7 +276,6 @@ async def sweep(ctx: Sc230Context):
 		if len(queue) > 0:
 			await ctx.channel.delete_messages(queue)
 			messagesSwept += len(queue)
-		await ctx.message.reply("done", delete_after=5)
 		raise CommandHandled
 
 @bot.command(ignore_extra=False)
