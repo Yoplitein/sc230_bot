@@ -24,6 +24,38 @@ class CustomHelp(commands.DefaultHelpCommand):
 	def get_command_signature(self, command):
 		return commands.HelpCommand.get_command_signature(self, command)
 
+	@override
+	def add_command_arguments(self, command, /) -> None:
+		# stolen (and lightly modified) from https://github.com/Rapptz/discord.py/blob/v2.4.0/discord/ext/commands/help.py#L1150
+
+		arguments = command.clean_params.values()
+		if not arguments:
+			return
+		if all(p.description is None for p in arguments):
+			return
+
+		self.paginator.add_line(self.arguments_heading)
+		max_size = self.get_max_size(arguments)
+
+		get_width = discord.utils._string_width
+		for argument in arguments:
+			if argument.description is None:
+				continue
+
+			name = argument.displayed_name or argument.name
+			width = max_size - (get_width(name) - len(name))
+			indent = f'{self.indent * " "}'
+			entry = f'{indent}{name:<{width}} - {argument.description or self.default_argument_description}'
+			multiline = "\n" in entry
+			if argument.displayed_default is not None:
+				sep = multiline and "\n" or " "
+				entry += f'{sep}(default: {argument.displayed_default})'
+			entry = entry.replace("\n", f"\n{indent}  ")
+
+			for line in entry.split("\n"):
+				self.paginator.add_line(line)
+
+
 class Sc230Bot(commands.Bot):
 	def __init__(self):
 		intents = discord.Intents.default()
