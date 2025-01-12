@@ -6,7 +6,7 @@ import os
 import discord
 from discord.ext import commands
 
-from . import config, serial, getLogger, COMMAND_FAILED_EMOJI, COMMAND_HANDLED_EMOJI
+from . import config, serial, RestartProcess, getLogger, COMMAND_FAILED_EMOJI, COMMAND_HANDLED_EMOJI
 from .serial import SerialError, SerialGuard
 
 logger = getLogger(__name__)
@@ -164,6 +164,8 @@ async def on_command_error(ctx: Sc230Context, err: BaseException):
 					await ctx.reply(f":boom: serial error: {err.ty} :boom:{rest}")
 				case CommandHandled():
 					return
+				case RestartProcess():
+					raise err
 				case _:
 					logger.exception("unhandled command invoke error", exc_info=err)
 					cause = ""

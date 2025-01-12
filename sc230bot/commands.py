@@ -722,5 +722,6 @@ async def restart(ctx: Sc230Context):
 	"""
 		admin only. restarts bot
 	"""
+	from . import RestartProcess
 	enforce_is_admin(ctx.author)
-	raise SystemExit # FIXME: needs to work without `--auto-restart`
+	raise RestartProcess

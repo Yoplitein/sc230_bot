@@ -8,7 +8,7 @@ import time
 import discord
 from discord.ext import commands
 
-from . import config, serial, commands as _, getLogger
+from . import config, serial, commands as _, getLogger, RestartProcess, logger
 from .bot import Sc230Context, bot
 
 async def main():
@@ -50,7 +50,17 @@ async def main():
 if __name__ == "__main__":
 	try:
 		if "--auto-restart" not in sys.argv or "--child" in sys.argv:
-			asyncio.run(main())
+			try:
+				asyncio.run(main())
+			except RestartProcess:
+				if "--auto-restart" in sys.argv:
+					logger.info("restart requested; deferring to supervisor")
+				else:
+					logger.info("restarting process without supervisor")
+					import gc
+					gc.collect()
+					args = sys.orig_argv
+					os.execvp(args[0], args)
 		else:
 			import subprocess
 

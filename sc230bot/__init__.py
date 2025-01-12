@@ -35,3 +35,6 @@ class Peekable:
 			except StopIteration:
 				return None
 		return self.queue[n]
+
+class RestartProcess(SystemExit):
+	pass
