@@ -1,12 +1,25 @@
 import discord
 
 from . import logger
-from .. import config, serial, getLogger, UNLOCKED_EMOJI, LOCKED_EMOJI
+from .. import config, serial, getLogger, UNLOCKED_EMOJI, LOCKED_EMOJI, category
 from ..serial import ProgramGuard, SerialError, SerialGuard, walk_ids
-from ..bot import Sc230Context, CommandError, CommandHandled, StatusGuard, enforce_is_admin, bot
+from ..bot import Sc230Context, CommandError, NoSubcommandError, CommandHandled, StatusGuard, enforce_is_admin, bot
 
-@bot.command(ignore_extra=False)
-async def channels(ctx: Sc230Context, groupId: int):
+@category("programming")
+@bot.group(invoke_without_command=True, aliases=["channels", "chan", "chans", "c"])
+async def channel(_, ctx: Sc230Context):
+	"""
+		channel management
+
+		a channel is an individual frequency. contained within a group,
+		which is in turn contained in a system
+
+		the device has a limit of 2500 channels per group
+	"""
+	raise NoSubcommandError
+
+@channel.command(name="list", ignore_extra=False, aliases=["ls"])
+async def list_(ctx: Sc230Context, groupId: int):
 	"""
 		list channels in a given group
 	"""
@@ -40,8 +53,8 @@ async def channels(ctx: Sc230Context, groupId: int):
 
 		raise CommandHandled
 
-@bot.command(ignore_extra=False)
-async def chanadd(ctx: Sc230Context, groupId: int, *, frequencySpecs: str):
+@channel.command(ignore_extra=False)
+async def add(ctx: Sc230Context, groupId: int, *, frequencySpecs: str):
 	"""
 		add new channels (frequencies) to a group. each frequency on one line, optionally followed by a name
 	"""
@@ -105,8 +118,8 @@ async def chanadd(ctx: Sc230Context, groupId: int, *, frequencySpecs: str):
 		await ctx.message.reply(f"created {len(frequencies) - numErrors} new channels out of {len(frequencies)} given{errors}")
 		raise CommandHandled
 
-@bot.command(ignore_extra=False)
-async def chandel(ctx: Sc230Context, ids: list[int]):
+@channel.command(ignore_extra=False, aliases=["del"])
+async def delete(ctx: Sc230Context, ids: list[int]):
 	"""
 		delete a channel
 	"""
@@ -114,8 +127,8 @@ async def chandel(ctx: Sc230Context, ids: list[int]):
 		for id in ids:
 			await serial.send_raw(f"DCH,{id}")
 
-@bot.command(ignore_extra=False)
-async def channame(ctx: Sc230Context, id: int, *, newName: str):
+@channel.command(ignore_extra=False)
+async def name(ctx: Sc230Context, id: int, *, newName: str):
 	"""
 		set a channel's name. limit 16 characters
 	"""
@@ -123,16 +136,16 @@ async def channame(ctx: Sc230Context, id: int, *, newName: str):
 	async with SerialGuard(ctx.message), ProgramGuard():
 		await serial.send_raw(f"CIN,{id},{newName},,,,,,,,,")
 
-@bot.command(ignore_extra=False)
-async def chanlock(ctx: Sc230Context, id: int, locked: bool):
+@channel.command(ignore_extra=False)
+async def lock(ctx: Sc230Context, id: int, locked: bool):
 	"""
 		set a channel's lockout status
 	"""
 	async with SerialGuard(ctx.message), ProgramGuard():
 		await serial.send_raw(f"CIN,{id},,,,,,,{locked & 1},,,")
 
-@bot.command(ignore_extra=False)
-async def chanfreq(ctx: Sc230Context, id: int, freq: float):
+@channel.command(ignore_extra=False, aliases=["freq"])
+async def frequency(ctx: Sc230Context, id: int, freq: float):
 	"""
 		set a channel's frequency
 	"""

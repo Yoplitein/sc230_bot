@@ -1,11 +1,13 @@
 import discord
 
-from .. import config, serial, getLogger, UNLOCKED_EMOJI, LOCKED_EMOJI
+from . import logger
+from .. import config, serial, getLogger, UNLOCKED_EMOJI, LOCKED_EMOJI, category
+from ..bot import Sc230Context, CommandError, NoSubcommandError, CommandHandled, StatusGuard, enforce_is_admin, bot
 from ..serial import ProgramGuard, SerialError, SerialGuard, walk_ids
-from ..bot import Sc230Context, CommandError, CommandHandled, StatusGuard, enforce_is_admin, bot
 
+@category("input")
 @bot.command(ignore_extra=False)
-async def key(ctx: Sc230Context, *, keys: str):
+async def key(_, ctx: Sc230Context, *, keys: str):
 	"""
 		press a series of buttons on the scanner. case insensitive, whitespace ignored
 
@@ -19,9 +21,9 @@ async def key(ctx: Sc230Context, *, keys: str):
 			0-9 - Digits
 			. - Decimal / No
 			E - Enter / Yes
-			> - Scroll right
-			< - Scroll left
-			^ - Enter
+			> - Scroll right / Next channel / Continue scan upward
+			< - Scroll left / Previous channel / Continue scan downward
+			^ - Enter (presses scrollwheel)
 			P - Power
 
 		key chords:
@@ -30,8 +32,9 @@ async def key(ctx: Sc230Context, *, keys: str):
 	"""
 	await ctx.send_keys(keys)
 
+@category("input")
 @bot.command(ignore_extra=False)
-async def keyon(ctx: Sc230Context):
+async def keyon(_, ctx: Sc230Context):
 	"""
 		enable treating all non-command messages as keycodes
 
@@ -43,8 +46,9 @@ async def keyon(ctx: Sc230Context):
 		raise CommandError("you are already in key input mode")
 	bot.keyInputUsers.add(ctx.author.id)
 
+@category("input")
 @bot.command(ignore_extra=False)
-async def keyoff(ctx: Sc230Context):
+async def keyoff(_, ctx: Sc230Context):
 	"""
 		disable keycode messages mode
 	"""
@@ -52,8 +56,9 @@ async def keyoff(ctx: Sc230Context):
 		raise CommandError("you are not in key input mode")
 	bot.keyInputUsers.remove(ctx.author.id)
 
+@category("input")
 @bot.command(ignore_extra=False)
-async def raw(ctx: Sc230Context, *, input: str):
+async def raw(_, ctx: Sc230Context, *, input: str):
 	"""
 		admin only. allows transmitting raw protocol data
 	"""
@@ -61,8 +66,9 @@ async def raw(ctx: Sc230Context, *, input: str):
 	await ctx.send_raw(input.split("\n"))
 	raise CommandHandled
 
+@category("input")
 @bot.command(ignore_extra=False)
-async def rawon(ctx: Sc230Context):
+async def rawon(_, ctx: Sc230Context):
 	"""
 		enable treating all non-command messages as raw protocol data
 	"""
@@ -73,8 +79,9 @@ async def rawon(ctx: Sc230Context):
 		raise CommandError("you are already in key input mode")
 	bot.rawInputUsers.add(ctx.author.id)
 
+@category("input")
 @bot.command(ignore_extra=False)
-async def rawoff(ctx: Sc230Context):
+async def rawoff(_, ctx: Sc230Context):
 	"""
 		disable keycode messages mode
 	"""

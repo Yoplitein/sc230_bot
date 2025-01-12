@@ -1,12 +1,24 @@
 import discord
 
 from . import logger
-from .. import config, serial, getLogger, UNLOCKED_EMOJI, LOCKED_EMOJI
+from .. import config, serial, getLogger, UNLOCKED_EMOJI, LOCKED_EMOJI, category
 from ..serial import ProgramGuard, SerialError, SerialGuard, walk_ids
-from ..bot import Sc230Context, CommandError, CommandHandled, StatusGuard, enforce_is_admin, bot
+from ..bot import Sc230Context, CommandError, NoSubcommandError, CommandHandled, StatusGuard, enforce_is_admin, bot
 
-@bot.command(ignore_extra=False)
-async def groups(ctx: Sc230Context, systemId: int):
+@category("programming")
+@bot.group(invoke_without_command=True, aliases=["groups", "g"])
+async def group(_, ctx: Sc230Context):
+	"""
+		group management
+
+		a group is a collection of channels, or frequencies. contained within a system
+
+		the device has a limit of 20 groups per system
+	"""
+	raise NoSubcommandError
+
+@group.command(name="list", ignore_extra=False, aliases=["ls"])
+async def list_(ctx: Sc230Context, systemId: int):
 	"""
 		list groups and IDs for the given system
 	"""
@@ -30,8 +42,8 @@ async def groups(ctx: Sc230Context, systemId: int):
 
 		raise CommandHandled
 
-@bot.command(ignore_extra=False)
-async def groupadd(ctx: Sc230Context, systemId: int, *, name: str = ""):
+@group.command(ignore_extra=False)
+async def add(ctx: Sc230Context, systemId: int, *, name: str = ""):
 	"""
 		add a new group to a system, optionally setting its name
 	"""
@@ -46,16 +58,16 @@ async def groupadd(ctx: Sc230Context, systemId: int, *, name: str = ""):
 		await ctx.message.reply(f"created new group with id {id}")
 		raise CommandHandled
 
-@bot.command(ignore_extra=False)
-async def groupdel(ctx: Sc230Context, id: int):
+@group.command(ignore_extra=False, aliases=["del"])
+async def delete(ctx: Sc230Context, id: int):
 	"""
 		delete a group
 	"""
 	async with SerialGuard(ctx.message), ProgramGuard():
 		await serial.send_raw(f"DGR,{id}")
 
-@bot.command(ignore_extra=False)
-async def groupname(ctx: Sc230Context, id: int, *, newName: str):
+@group.command(ignore_extra=False)
+async def name(ctx: Sc230Context, id: int, *, newName: str):
 	"""
 		set a group's name. limit 16 characters
 	"""
@@ -63,8 +75,8 @@ async def groupname(ctx: Sc230Context, id: int, *, newName: str):
 	async with SerialGuard(ctx.message), ProgramGuard():
 		await serial.send_raw(f"GIN,{id},{newName},,")
 
-@bot.command(ignore_extra=False)
-async def grouplock(ctx: Sc230Context, id: int, locked: bool):
+@group.command(ignore_extra=False)
+async def lock(ctx: Sc230Context, id: int, locked: bool):
 	"""
 		set a group's lockout status
 	"""

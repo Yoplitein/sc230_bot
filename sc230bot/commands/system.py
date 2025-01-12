@@ -1,12 +1,24 @@
 import discord
 
 from . import logger
-from .. import config, serial, getLogger, UNLOCKED_EMOJI, LOCKED_EMOJI
-from ..bot import Sc230Context, CommandError, CommandHandled, StatusGuard, enforce_is_admin, bot
+from .. import config, serial, getLogger, UNLOCKED_EMOJI, LOCKED_EMOJI, category
+from ..bot import Sc230Context, CommandError, NoSubcommandError, CommandHandled, StatusGuard, enforce_is_admin, bot
 from ..serial import ProgramGuard, SerialError, SerialGuard, walk_ids
 
-@bot.command(ignore_extra=False)
-async def systems(ctx: Sc230Context):
+@category("programming")
+@bot.group(invoke_without_command=True, aliases=["systems", "sys", "s"])
+async def system(_, ctx: Sc230Context):
+	"""
+		system management
+
+		a system is a collection of groups, which in turn contain channels (individual frequencies)
+
+		the device has a limit of 200 systems
+	"""
+	raise NoSubcommandError
+
+@system.command(name="list", ignore_extra=False, aliases=["ls"])
+async def list_(ctx: Sc230Context):
 	"""
 		list systems and their IDs
 	"""
@@ -28,8 +40,8 @@ async def systems(ctx: Sc230Context):
 			await ctx.message.reply("no systems found")
 		raise CommandHandled
 
-@bot.command(ignore_extra=False)
-async def systemadd(ctx: Sc230Context, *, name: str = ""):
+@system.command(ignore_extra=False)
+async def add(ctx: Sc230Context, *, name: str = ""):
 	"""
 		add a new system, optionally setting its name
 	"""
@@ -43,16 +55,16 @@ async def systemadd(ctx: Sc230Context, *, name: str = ""):
 		await ctx.message.reply(f"created new system with id {id}")
 		raise CommandHandled
 
-@bot.command(ignore_extra=False)
-async def systemdel(ctx: Sc230Context, *, id: int):
+@system.command(ignore_extra=False, aliases=["del"])
+async def delete(ctx: Sc230Context, *, id: int):
 	"""
 		delete a system
 	"""
 	async with SerialGuard(ctx.message), ProgramGuard():
 		await serial.send_raw(f"DSY,{id}")
 
-@bot.command(ignore_extra=False)
-async def systemname(ctx: Sc230Context, id: int, *, newName: str):
+@system.command(ignore_extra=False)
+async def name(ctx: Sc230Context, id: int, *, newName: str):
 	"""
 		set a system's name. limit 16 characters
 	"""
@@ -60,8 +72,8 @@ async def systemname(ctx: Sc230Context, id: int, *, newName: str):
 	async with SerialGuard(ctx.message), ProgramGuard():
 		await serial.send_raw(f"SIN,{id},{newName},,,,,,,")
 
-@bot.command(ignore_extra=False)
-async def systemlock(ctx: Sc230Context, id: int, locked: bool):
+@system.command(ignore_extra=False)
+async def lock(ctx: Sc230Context, id: int, locked: bool):
 	"""
 		set a system's lockout status
 	"""

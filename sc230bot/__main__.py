@@ -10,8 +10,8 @@ import time
 import discord
 from discord.ext import commands
 
-from . import config, getLogger, RestartProcess, logger
-from .bot import Sc230Context, bot
+from . import config, RestartProcess, getCategory, category, categories, logger
+from .bot import Sc230Context, CommandHandled, bot
 
 async def main():
 	from . import commands as _
@@ -27,10 +27,11 @@ async def main():
 	logger.setLevel(int(os.getenv("LOG_LEVEL", logging.INFO)))
 	logger.info("logging initialized")
 
-	infoCmds = commands.Cog()
-	infoCmds.__cog_name__ = "info"
 	for name in config.get("info_commands"):
 		def pythonpls(name):
+			global category
+			@category("info")
+			@commands.command(name=name)
 			async def cmd(_, ctx: Sc230Context):
 				files = glob.glob(name + "*.txt")
 				files.sort()
@@ -38,9 +39,7 @@ async def main():
 					with open(file, "r") as f:
 						contents = f.read().strip()
 						await ctx.reply(contents)
-			cmd = commands.Command(cmd, cog=infoCmds, name=name)
-			cmd.params.clear() # misdetects `ctx` as a parameter, so fix that up
-			infoCmds.__cog_commands__ += (cmd,)
+				raise CommandHandled
 		pythonpls(name)
 
 	prefixes = config.get("command_prefix")
@@ -49,7 +48,9 @@ async def main():
 	bot.command_prefix = commands.when_mentioned_or(*prefixes)
 	try:
 		async with bot:
-			await bot.add_cog(infoCmds)
+			for category in categories.values():
+				logger.debug(f"adding category {category=}")
+				await bot.add_cog(category)
 			await bot.start(config.get("token"))
 	finally:
 		logger.info("exiting")

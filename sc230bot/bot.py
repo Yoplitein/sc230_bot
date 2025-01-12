@@ -16,7 +16,7 @@ class CustomHelp(commands.DefaultHelpCommand):
 	def __init__(self):
 		super().__init__(
 			show_parameter_descriptions=True,
-			no_category="Misc",
+			no_category="misc",
 		)
 
 	# fix command signatures being mutually exclusive with parameter descriptions
@@ -33,6 +33,8 @@ class Sc230Bot(commands.Bot):
 			command_prefix=None, # set after config is parsed
 			help_command=CustomHelp()
 		)
+		self.help_command.command_attrs["help"] = "helps u bro"
+		logger.debug(f"{self.help_command.command_attrs=}")
 
 		self.rawInputUsers = set()
 		self.keyInputUsers = set()
@@ -126,6 +128,9 @@ class CommandError(Exception):
 		self.msg = msg
 		self.__dict__.update(kwargs)
 
+class NoSubcommandError(Exception):
+	pass
+
 class CommandHandled(Exception):
 	pass
 
@@ -136,7 +141,7 @@ def enforce_is_admin(user: discord.User):
 	if not is_admin(user):
 		raise CommandError("you do not have permission")
 
-bot = Sc230Bot()
+bot: Sc230Bot = Sc230Bot()
 
 @bot.event
 async def on_ready():
@@ -187,6 +192,11 @@ async def on_command_error(ctx: Sc230Context, err: BaseException):
 					return
 				case RestartProcess():
 					raise err
+				case NoSubcommandError():
+					import pdb;
+					subcommands = ctx.command.all_commands.keys()
+					subcommands = "\n".join(f"* {name}" for name in subcommands)
+					await ctx.reply(f"no subcommand given, expected one of:\n```\n{subcommands}\n```")
 				case _:
 					logger.exception("unhandled command invoke error", exc_info=err)
 					cause = ""

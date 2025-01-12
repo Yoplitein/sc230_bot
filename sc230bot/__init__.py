@@ -1,5 +1,9 @@
+import inspect
 from logging import getLogger
+from typing import Callable
 import collections
+
+from discord.ext.commands import Cog, Command
 
 LOCKED_EMOJI = "\N{LOCK}"
 UNLOCKED_EMOJI = "\N{BLACK RIGHT-POINTING TRIANGLE}\uFE0F"
@@ -33,3 +37,40 @@ class Peekable:
 
 class RestartProcess(SystemExit):
 	pass
+
+categories = {}
+def getCategory(name: str, help = None) -> Cog:
+	if name in categories:
+		return categories[name]
+
+	category = Cog()
+	category.__cog_name__ = name
+	categories[name] = category
+	if help:
+		category.description = help
+	else:
+		category.description = None
+	return category
+
+def category(name: str):
+	def inner(cmd: Command):
+		from .bot import bot
+
+		assert isinstance(cmd, Command), "category decorator must come before command decorator"
+		assert len(inspect.getfullargspec(cmd.callback).args) >= 2, "categorized command must take cog parameter before ctx parameter"
+
+		category = getCategory(name)
+		bot.remove_command(cmd.name)
+		cmd.cog = category
+		if "ctx" in cmd.params:
+			cmd.params.pop("ctx")
+		category.__cog_commands__ += (cmd,)
+		return cmd
+	return inner
+
+getCategory("info", "commands that print out general information")
+getCategory("input", "direct scanner interaction")
+getCategory("inspection", "prints out various datum")
+getCategory("locking", "lockout (or simply locking) prevents scanning a particular frequency, channel, group, or system")
+getCategory("programming", "commands to manipulate the device's database of candidate frequencies while in normal scan mode")
+getCategory("scanning", "commands to enter scanning modes")

@@ -3,14 +3,15 @@ import itertools
 
 import discord
 
-from .. import config, serial, getLogger, UNLOCKED_EMOJI, LOCKED_EMOJI
+from .. import config, serial, getLogger, UNLOCKED_EMOJI, LOCKED_EMOJI, category
 from ..serial import ProgramGuard, SerialError, SerialGuard, walk_ids
 from ..bot import Sc230Context, CommandError, CommandHandled, StatusGuard, enforce_is_admin, bot
 
 logger = getLogger(__name__)
 
+@category("inspection")
 @bot.command(ignore_extra=False)
-async def status(ctx: Sc230Context):
+async def status(_, ctx: Sc230Context):
 	"""
 		print status lines (see also webcam)
 	"""
@@ -25,167 +26,9 @@ async def status(ctx: Sc230Context):
 		await ctx.message.reply(f"```\n{l1}\n{l2}\n{l3}\n{l4}\n```")
 		raise CommandHandled
 
-class SearchOption(str, Enum):
-	public = ("public", "", "public safety")
-	news = ("news", ">")
-	ham = ("ham", ">>", "amateur radio")
-	marine = ("marine", ">>>")
-	rail = ("rail", ">>>>")
-	air = ("air", ">>>>>")
-	cb = ("cb", ">>>>>>", "Citizens Band")
-	gmrs = ("gmrs", ">>>>>>>", "Family Radio Service/General Mobile Radio Service")
-	racing = ("racing", ">>>>>>>>", "NASCAR and stuff")
-	special = ("special", ">>>>>>>>>", "idk man the manual doesn't say")
-	weather = ("weather", "special", "National Weather Service broadcasts")
-
-	def __new__(cls, label, keys, description=None):
-		obj = str.__new__(cls, label)
-		obj._value_ = label
-		obj.keys = keys
-		obj.description = description
-		return obj
-
+@category("inspection")
 @bot.command(ignore_extra=False)
-async def search(ctx: Sc230Context, *, option: SearchOption):
-	"""
-		scan preprogrammed frequency ranges
-	"""
-	async with SerialGuard(ctx.message):
-		await serial.send_raw(b"EPG")
-		if option == "weather":
-			await serial.send_keys(b"M>>>>>^")
-		else:
-			await serial.send_keys(b"M>>^^")
-			await serial.send_keys(option.keys)
-		await serial.send_key(ord('^'))
-search.help += f"\n\noption must be one of:" + \
-	"\n  ".join(itertools.chain([""], (
-		f"{o.value}{o.description and " - " or ""}{o.description or ""}" for o in SearchOption
-	)))
-
-@bot.command(ignore_extra=False)
-async def freq(ctx: Sc230Context, *, freq: float):
-	"""
-		tune in to a specific frequency (to nearest 5kHz)
-	"""
-	freq = serial.format_frequency(freq)
-	async with SerialGuard(ctx.message):
-		match (await serial.send_raw(f"QSH,{freq},0,AUTO,0,2,0,1,0,0")).split(","):
-			case ["QSH", "OK"]:
-				pass
-			case ["QSH", "ERR"]:
-				raise CommandError("couldn't tune in, is the scanner busy?")
-
-@bot.command(ignore_extra=False)
-async def freqrange(ctx: Sc230Context, minfreq: float, maxfreq: float):
-	"""
-		scan through a range of frequencies
-
-		overrides custom search group 0
-	"""
-	minfreq = serial.format_frequency(minfreq)
-	maxfreq = serial.format_frequency(maxfreq)
-	username = f"${serial.sanitize_string(ctx.author.display_name)}"
-	async with SerialGuard(ctx.message):
-		async with ProgramGuard():
-			await serial.send_raw(f"CSG,{"1" * 9}0")
-			await serial.send_raw(f"CSP,0,{username},{minfreq},{maxfreq},0,AUTO,0,2,0")
-		await serial.send_keys(b"F+S.>E")
-
-@bot.command(ignore_extra=False)
-async def cs(ctx: Sc230Context, *, groups: str = "0123456789"):
-	"""
-		switch to custom search mode with the given group IDs enabled, defaults to all
-	"""
-	groups = groups.replace(" ", "")
-	if not all(v in "0123456789" for v in groups):
-		raise CommandError("search groups must be given as numbers 0-9")
-
-	async with SerialGuard(ctx.message):
-		async with ProgramGuard():
-			state = list("1" * 10)
-			for v in groups:
-				v = int(v)
-				state[v - 1] = "0"
-			state = "".join(state)
-			await serial.send_raw(f"CSG,{state}")
-		await serial.send_keys("F+S.>E")
-
-@bot.command(ignore_extra=False)
-async def csgroups(ctx: Sc230Context):
-	"""
-		print custom search groups
-	"""
-	async with SerialGuard(ctx.message), ProgramGuard():
-		lines = []
-		for id in range(10):
-			id = (id + 1) % 10
-			match (await serial.send_raw(f"CSP,{id}")).split(","):
-				case ["CSP", name, minfreq, maxfreq, *_]:
-					minfreq = serial.parse_frequency(minfreq)
-					maxfreq = serial.parse_frequency(maxfreq)
-					lines.append(f"* {id} - {name}")
-					lines.append(f"  * {minfreq} to {maxfreq}")
-				case resp:
-					raise CommandError(f"unexpected response {resp=}")
-		await ctx.message.reply("\n".join(lines))
-		raise CommandHandled
-
-@bot.command(ignore_extra=False)
-async def csfreq(ctx: Sc230Context, group: int, minfreq: float, maxfreq: float):
-	"""
-		set custom search group min/max frequencies. note that on group 0 this may be overridden by `$freqrange`
-	"""
-	if group < 0 or group > 9:
-		raise CommandError("search groups must be given as numbers 0-9")
-	minfreq = serial.format_frequency(minfreq)
-	maxfreq = serial.format_frequency(maxfreq)
-	async with SerialGuard(ctx.message), ProgramGuard():
-		await serial.send_raw(f"CSP,{group},,{minfreq},{maxfreq},,,,,")
-
-@bot.command(ignore_extra=False)
-async def csname(ctx: Sc230Context, group: int, *, name: str):
-	"""
-		set custom search group name
-	"""
-	if group < 0 or group > 9:
-		raise CommandError("search groups must be given as numbers 0-9")
-	name = serial.sanitize_string(name)
-	async with SerialGuard(ctx.message), ProgramGuard():
-		await serial.send_raw(f"CSP,{group},{name},,,,,,,")
-
-csallBands = {
-	"Petrol/CB/Ham": ("25", "54"),
-	"Ham/Fed/Military": ("137", "174"),
-	"More Ham/Fed": ("400", "512"),
-	"Public": ("806", "956"),
-	"GHz ham": ("1240", "1300")
-}
-@bot.command(ignore_extra=False)
-async def csall(ctx: Sc230Context):
-	"""
-		programs set of search groups covering the hardware's frequency range
-	"""
-	async with SerialGuard(ctx.message, typing=True):
-		async with ProgramGuard():
-			enabled = ""
-			for (group, (name, (minfreq, maxfreq))) in enumerate(csallBands.items()):
-				group += 1
-				enabled += str(group)
-				minfreq = serial.format_frequency(minfreq)
-				maxfreq = serial.format_frequency(maxfreq)
-				await serial.send_raw(f"CSP,{group},{name},{minfreq},{maxfreq},,,,,")
-
-			state = list("1" * 10)
-			for v in enabled:
-				v = int(v)
-				state[v - 1] = "0"
-			state = "".join(state)
-			await serial.send_raw(f"CSG,{state}")
-		await serial.send_keys("F+S.>E")
-
-@bot.command(ignore_extra=False)
-async def tree(ctx: Sc230Context):
+async def tree(_, ctx: Sc230Context):
 	"""
 		print all systems, their groups, and channels
 	"""
@@ -255,8 +98,9 @@ async def tree(ctx: Sc230Context):
 		await ctx.message.reply(embeds=batch)
 	raise CommandHandled
 
+@category("inspection")
 @bot.command(ignore_extra=False)
-async def locked(ctx: Sc230Context):
+async def locked(_, ctx: Sc230Context):
 	"""
 		fixme
 	"""
@@ -282,13 +126,66 @@ async def locked(ctx: Sc230Context):
 		await ctx.message.reply("\n".join(lines))
 		raise CommandHandled
 
+class SearchOption(str, Enum):
+	public = ("public", "", "public safety")
+	news = ("news", ">")
+	ham = ("ham", ">>", "amateur radio")
+	marine = ("marine", ">>>")
+	rail = ("rail", ">>>>")
+	air = ("air", ">>>>>")
+	cb = ("cb", ">>>>>>", "Citizens Band")
+	gmrs = ("gmrs", ">>>>>>>", "Family Radio Service/General Mobile Radio Service")
+	racing = ("racing", ">>>>>>>>", "NASCAR and stuff")
+	special = ("special", ">>>>>>>>>", "idk man the manual doesn't say")
+	weather = ("weather", "special", "National Weather Service broadcasts")
+
+	def __new__(cls, label, keys, description = None):
+		obj = str.__new__(cls, label)
+		obj._value_ = label
+		obj.keys = keys
+		obj.description = description
+		return obj
+
+@category("scanning")
 @bot.command(ignore_extra=False)
-async def lockout(ctx: Sc230Context, *frequencies: float):
+async def search(_, ctx: Sc230Context, *, option: SearchOption):
+	"""
+		scan preprogrammed frequency ranges
+	"""
+	async with SerialGuard(ctx.message):
+		await serial.send_raw(b"EPG")
+		if option == "weather":
+			await serial.send_keys(b"M>>>>>^")
+		else:
+			await serial.send_keys(b"M>>^^")
+			await serial.send_keys(option.keys)
+		await serial.send_key(ord('^'))
+search.help += f"\n\noption must be one of:" + \
+	"\n  ".join(itertools.chain([""], (
+		f"{o.value}{o.description and " - " or ""}{o.description or ""}" for o in SearchOption
+	)))
+
+@category("scanning")
+@bot.command(ignore_extra=False)
+async def freq(_, ctx: Sc230Context, *, freq: float):
+	"""
+		tune in to a specific frequency (to nearest 5kHz)
+	"""
+	freq = serial.format_frequency(freq)
+	async with SerialGuard(ctx.message):
+		match (await serial.send_raw(f"QSH,{freq},0,AUTO,0,2,0,1,0,0")).split(","):
+			case ["QSH", "OK"]:
+				pass
+			case ["QSH", "ERR"]:
+				raise CommandError("couldn't tune in, is the scanner busy?")
+
+@category("locking")
+@bot.command(ignore_extra=False)
+async def lockout(_, ctx: Sc230Context, *frequencies: float):
 	"""
 		lock out specific frequencies
 	"""
 	frequencies = list(map(serial.format_frequency, frequencies))
-	logger.debug(f"{frequencies=}")
 	async with SerialGuard(ctx.message), ProgramGuard():
 		locked = 0
 		errs = 0
@@ -306,8 +203,9 @@ async def lockout(ctx: Sc230Context, *frequencies: float):
 			errs = ""
 		await ctx.message.reply(f"locked {locked} freqs{errs}")
 
+@category("locking")
 @bot.command(ignore_extra=False)
-async def unlockall(ctx: Sc230Context):
+async def unlockall(_, ctx: Sc230Context):
 	"""
 		unlock all locked out systems/groups/channels
 	"""
