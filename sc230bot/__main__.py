@@ -19,11 +19,11 @@ async def main():
 	from .commands import input as _
 	from .commands import system as _
 
-	discord.utils.setup_logging(root = False)
+	discord.utils.setup_logging(root=False)
 	consoleHandler = logging.getLogger(discord.__name__).handlers[-1]
-	for logger in getLogger.loggers:
-		logger.addHandler(consoleHandler)
-		logger.setLevel(int(os.getenv("LOG_LEVEL", logging.INFO)))
+	logger.addHandler(consoleHandler)
+	logger.setLevel(int(os.getenv("LOG_LEVEL", logging.INFO)))
+	logger.info("logging initialized")
 
 	infoCmds = commands.Cog()
 	infoCmds.__cog_name__ = "info"

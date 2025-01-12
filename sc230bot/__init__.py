@@ -1,5 +1,5 @@
+from logging import getLogger
 import collections
-import logging
 
 LOCKED_EMOJI = "\N{LOCK}"
 UNLOCKED_EMOJI = "\N{BLACK RIGHT-POINTING TRIANGLE}\uFE0F"
@@ -7,12 +7,7 @@ UNLOCKED_EMOJI = "\N{BLACK RIGHT-POINTING TRIANGLE}\uFE0F"
 COMMAND_HANDLED_EMOJI = "\N{WHITE HEAVY CHECK MARK}"
 COMMAND_FAILED_EMOJI = "\N{CROSS MARK}"
 
-def getLogger(name: str) -> logging.Logger:
-	logger = logging.getLogger(__name__)
-	getLogger.loggers.append(logger)
-	return logger
-getLogger.loggers = []
-logger = logging.getLogger(__name__)
+logger = getLogger(__name__)
 
 class Peekable:
 	def __init__(self, iterable):
