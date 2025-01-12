@@ -197,7 +197,7 @@ async def walk_ids(head: int, tail: int) -> list[int]:
 
 	ids = [head]
 	while tail != "-1" and head != tail:
-		match (await serial.send_raw(f"FWD,{head}")).split(","):
+		match (await send_raw(f"FWD,{head}")).split(","):
 			case ["FWD", "-1"]:
 				assert False, "forward id is -1???"
 			case ["FWD", next]:
