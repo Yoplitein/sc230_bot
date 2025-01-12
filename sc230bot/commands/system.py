@@ -57,12 +57,14 @@ async def add(ctx: Sc230Context, *, name: str = commands.parameter(default="", d
 		raise CommandHandled
 
 @system.command(ignore_extra=False, aliases=["del"])
-async def delete(ctx: Sc230Context, *, id: int):
+async def delete(ctx: Sc230Context, *, ids: str = commands.parameter(displayed_name="system ids")):
 	"""
 		delete a system
 	"""
+	ids = list(int(v) for v in ids.split())
 	async with SerialGuard(ctx.message), ProgramGuard():
-		await serial.send_raw(f"DSY,{id}")
+		for id in ids:
+			await serial.send_raw(f"DSY,{id}")
 
 @system.command(ignore_extra=False)
 async def name(

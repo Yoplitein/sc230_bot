@@ -132,10 +132,11 @@ async def add(
 		raise CommandHandled
 
 @channel.command(ignore_extra=False, aliases=["del"])
-async def delete(ctx: Sc230Context, ids: list[int] = commands.parameter(displayed_name="ids...")):
+async def delete(ctx: Sc230Context, *, ids: str = commands.parameter(displayed_name="channel ids", )):
 	"""
 		delete a batch of channels
 	"""
+	ids = list(int(v) for v in ids.split())
 	async with SerialGuard(ctx.message), ProgramGuard():
 		for id in ids:
 			await serial.send_raw(f"DCH,{id}")

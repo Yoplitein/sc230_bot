@@ -66,12 +66,14 @@ async def add(
 		raise CommandHandled
 
 @group.command(ignore_extra=False, aliases=["del"])
-async def delete(ctx: Sc230Context, id: int = commands.parameter(displayed_name="group id")):
+async def delete(ctx: Sc230Context, *, ids: str = commands.parameter(displayed_name="group ids")):
 	"""
 		delete a group
 	"""
+	ids = list(int(v) for v in ids.split())
 	async with SerialGuard(ctx.message), ProgramGuard():
-		await serial.send_raw(f"DGR,{id}")
+		for id in ids:
+			await serial.send_raw(f"DGR,{id}")
 
 @group.command(ignore_extra=False)
 async def name(
