@@ -48,7 +48,7 @@ class ProgramGuard:
 	level = 0
 
 	@classmethod
-	async def __aenter__(self, ):
+	async def __aenter__(self):
 		self.level += 1
 		if self.level > 1:
 			return
