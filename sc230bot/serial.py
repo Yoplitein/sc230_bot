@@ -22,18 +22,23 @@ class SerialGuard:
 
 	def __init__(self, msg: discord.Message, typing: bool = False):
 		self.msg = msg
-		self.pendingMsg = None
 		self.typing = None
 		if typing:
 			self.typing = msg.channel.typing()
 
 	async def __aenter__(self):
+		pendingMsg = None
 		if self.lock.locked():
-			self.pendingMsg = await self.msg.reply("waiting for other command(s) to finish")
+			pendingMsg = await self.msg.reply("waiting for other command(s) to finish")
+
 		if self.typing:
 			await self.typing.__aenter__()
+
 		await self.lock.acquire()
 		self.lockStart = time.time()
+		if pendingMsg:
+			await pendingMsg.delete()
+
 		open()
 		logger.debug(f"serial locked for author={self.msg.author.name!r} content={self.msg.content!r}")
 
@@ -45,8 +50,6 @@ class SerialGuard:
 
 		if self.typing:
 			await self.typing.__aexit__(*_)
-		if self.pendingMsg:
-			await self.pendingMsg.delete()
 
 class ProgramGuard:
 	level = 0
