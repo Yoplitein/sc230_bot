@@ -146,24 +146,24 @@ class StatusGuard:
 			except:
 				logger.exception("StatusGuard task failed")
 
-	def getFormat(self, last = False):
+	def get_format(self, last = False):
 		kwargs = {}
 		if last and "last" in inspect.getfullargspec(self.format).kwonlyargs:
 			kwargs["last"] = True
 		return self.format(**kwargs)
 
 	async def task_func(self):
-		kwargs = self.getFormat()
+		kwargs = self.get_format()
 		kwargs.pop("delete_after", None)
 		self.statusMsg = await self.ctx.send(**kwargs, reference=self.reply and self.ctx.message or None)
 		try:
 			while True:
 				await asyncio.sleep(self.interval)
-				kwargs = self.getFormat()
+				kwargs = self.get_format()
 				kwargs.pop("delete_after", None)
 				await self.statusMsg.edit(**kwargs)
 		finally:
-			kwargs = self.getFormat(last=True)
+			kwargs = self.get_format(last=True)
 			if "delete_after" in kwargs:
 				await self.statusMsg.edit(**kwargs)
 			else:

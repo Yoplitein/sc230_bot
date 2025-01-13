@@ -280,7 +280,7 @@ async def sweep(ctx: Sc230Context, *, all: str = commands.parameter(default=Fals
 	statusGuard = StatusGuard(ctx, format_status, reply=False)
 
 	repliedTo = set()
-	def shouldDelete(msg: discord.Message):
+	def should_delete(msg: discord.Message):
 		if msg.pinned:
 			return False
 		if msg.id == statusGuard.statusMsg.id:
@@ -298,7 +298,7 @@ async def sweep(ctx: Sc230Context, *, all: str = commands.parameter(default=Fals
 		async for foundMsg in ctx.channel.history(limit=None):
 			if foundMsg.id == ctx.message.id:
 				continue
-			if not shouldDelete(foundMsg):
+			if not should_delete(foundMsg):
 				continue
 			if foundMsg.reference:
 				repliedTo.add(foundMsg.reference.message_id)

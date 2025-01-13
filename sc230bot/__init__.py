@@ -39,7 +39,7 @@ class RestartProcess(SystemExit):
 	pass
 
 categories = {}
-def getCategory(name: str, help = None) -> Cog:
+def get_category(name: str, help = None) -> Cog:
 	if name in categories:
 		return categories[name]
 
@@ -59,7 +59,7 @@ def category(name: str):
 		assert isinstance(cmd, Command), "category decorator must come before command decorator"
 		assert len(inspect.getfullargspec(cmd.callback).args) >= 2, "categorized command must take cog parameter before ctx parameter"
 
-		category = getCategory(name)
+		category = get_category(name)
 		bot.remove_command(cmd.name)
 		cmd.cog = category
 		if "ctx" in cmd.params:
@@ -68,9 +68,9 @@ def category(name: str):
 		return cmd
 	return inner
 
-getCategory("info", "commands that print out general information")
-getCategory("input", "direct scanner interaction")
-getCategory("inspection", "prints out various datum")
-getCategory("locking", "lockout (or simply locking) prevents scanning a particular frequency, channel, group, or system")
-getCategory("programming", "commands to manipulate the device's database of candidate frequencies while in normal scan mode")
-getCategory("scanning", "commands to enter scanning modes")
+get_category("info", "commands that print out general information")
+get_category("input", "direct scanner interaction")
+get_category("inspection", "prints out various datum")
+get_category("locking", "lockout (or simply locking) prevents scanning a particular frequency, channel, group, or system")
+get_category("programming", "commands to manipulate the device's database of candidate frequencies while in normal scan mode")
+get_category("scanning", "commands to enter scanning modes")

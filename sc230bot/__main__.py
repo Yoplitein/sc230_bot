@@ -10,7 +10,7 @@ import time
 import discord
 from discord.ext import commands
 
-from . import config, RestartProcess, getCategory, category, categories, logger
+from . import config, RestartProcess, get_category, category, categories, logger
 from .bot import Sc230Context, CommandHandled, bot
 
 async def main():
@@ -55,7 +55,7 @@ async def main():
 	finally:
 		logger.info("exiting")
 
-def supervisorMain():
+def supervisor_main():
 	args = sys.orig_argv + ["--child"]
 	fails = 0
 	while True:
@@ -72,12 +72,12 @@ def supervisorMain():
 			fails += 1
 			if fails >= 5:
 				print("Supervisor waiting for changes due to restart loop", file=sys.stderr)
-				waitForChanges()
+				wait_for_changes()
 				fails = 0
 				continue
 			time.sleep(2.5)
 
-def waitForChanges():
+def wait_for_changes():
 	inotify = None
 	try:
 		from pathlib import Path
@@ -126,6 +126,6 @@ if __name__ == "__main__":
 			except RestartProcess:
 				restart()
 		else:
-			supervisorMain()
+			supervisor_main()
 	except KeyboardInterrupt:
 		raise SystemExit(1)
