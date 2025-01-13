@@ -93,6 +93,7 @@ serial: Optional[pyserial.Serial] = None
 def open():
 	global serial
 	assert SerialGuard.lock.locked()
+	assert serial is None
 	serial = pyserial.Serial(
 		config.get("serial_port"),
 		baudrate=config.get("serial_baud"),
@@ -109,8 +110,8 @@ def open():
 def close():
 	global serial
 	assert SerialGuard.lock.locked()
-	if serial:
-		serial.close()
+	assert serial is not None
+	serial.close()
 	serial = None
 
 def read_line() -> bytes:
