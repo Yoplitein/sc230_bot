@@ -48,6 +48,11 @@ class SerialGuard:
 		lockDuration = time.time() - self.lockStart
 		logger.debug(f"serial unlocked, held for {lockDuration:02f} seconds")
 
+	@classmethod
+	def enforce(self):
+		assert self.lock.locked(), "expected serial lock to be locked but it is unlocked"
+		assert serial is not None, "expected serial port to be open but it is `None`"
+
 class ProgramGuard:
 	level = 0
 
@@ -109,12 +114,12 @@ def open():
 
 def close():
 	global serial
-	assert SerialGuard.lock.locked()
-	assert serial is not None
+	SerialGuard.enforce()
 	serial.close()
 	serial = None
 
 def read_line() -> bytes:
+	SerialGuard.enforce()
 	res = bytes()
 	while True:
 		read = serial.read(1)
@@ -140,6 +145,7 @@ def read_line() -> bytes:
 			return res
 
 def write_line(line: bytes):
+	SerialGuard.enforce()
 	assert type(line) is bytes, "type error"
 	line += b"\r"
 	logger.debug(f"serial write {line!r}")
