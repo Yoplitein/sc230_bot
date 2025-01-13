@@ -65,6 +65,30 @@ class ProgramGuard:
 		if self.level == 0:
 			await send_raw(b"EPG")
 
+class IdWalker:
+	def __init__(self, seed: int):
+		from collections import deque
+		assert type(seed) is int
+		self.queue = deque([seed])
+		self.visited = set([seed])
+
+	def __iter__(self):
+		return self
+
+	def __next__(self):
+		if not self.queue:
+			raise StopIteration
+		return self.queue.popleft()
+
+	def add(self, revIndex: int, fwdIndex: int):
+		assert type(revIndex) is int
+		assert type(fwdIndex) is int
+		for v in [revIndex, fwdIndex]:
+			if v < 0 or v in self.visited:
+				continue
+			self.visited.add(v)
+			self.queue.append(v)
+
 serial: Optional[pyserial.Serial] = None
 def open():
 	global serial

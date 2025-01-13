@@ -46,35 +46,43 @@ async def tree(_, ctx: Sc230Context):
 	systems = []
 	async with SerialGuard(ctx.message, typing=True), ProgramGuard(), StatusGuard(ctx, format_status, interval=2.5):
 		systemHead = int((await serial.send_raw(b"SIH")).split(",")[1])
-		systemTail = int((await serial.send_raw(b"SIT")).split(",")[1])
-		for systemId in await walk_ids(systemHead, systemTail):
+		systemWalker = serial.IdWalker(systemHead)
+		for systemId in systemWalker:
 			doneSystems += 1
 
-			(_, _, systemName, _, _, locked, _, _, _, _, _, _, groupHead, groupTail, _) = (await serial.send_raw(f"SIN,{systemId}")).split(",")
+			(_, _, systemName, _, _, locked, _, _, _, _, rev, fwd, groupHead, groupTail, _) = (await serial.send_raw(f"SIN,{systemId}")).split(",")
 			locked = locked != "0"
 			[groupHead, groupTail] = map(int, [groupHead, groupTail])
+			rev, fwd = int(rev), int(fwd)
+			systemWalker.add(rev, fwd)
 
 			locked = LOCKED_EMOJI if locked else UNLOCKED_EMOJI
 			embed = discord.Embed(title=f"{systemId} - {systemName} {locked}")
 			systems.append(embed)
 
 			noGroups = True
-			for groupId in await walk_ids(groupHead, groupTail):
+			groupWalker = serial.IdWalker(groupHead)
+			for groupId in groupWalker:
 				noGroups = False
 				doneGroups += 1
 
-				(_, _, groupName, _, locked, _, _, _, chanHead, chanTail, _) = (await serial.send_raw(f"GIN,{groupId}")).split(",")
+				(_, _, groupName, _, locked, rev, fwd, _, chanHead, chanTail, _) = (await serial.send_raw(f"GIN,{groupId}")).split(",")
 				locked = locked != "0"
 				[chanHead, chanTail] = map(int, [chanHead, chanTail])
+				rev, fwd = int(rev), int(fwd)
+				groupWalker.add(rev, fwd)
 
 				locked = LOCKED_EMOJI if locked else UNLOCKED_EMOJI
 				embed.add_field(name=f"{groupId} - {groupName} {locked}", value="", inline=False)
 
 				channels = []
-				for channelId in await walk_ids(chanHead, chanTail):
+				channelWalker = serial.IdWalker(chanHead)
+				for channelId in channelWalker:
 					doneChannels += 1
 
-					(_, name, freq, _, _, _, _, locked, *_) = (await serial.send_raw(f"CIN,{channelId}")).split(",")
+					(_, name, freq, _, _, _, _, locked, _, _, _, rev, fwd, _, _) = (await serial.send_raw(f"CIN,{channelId}")).split(",")
+					rev, fwd = int(rev), int(fwd)
+					channelWalker.add(rev, fwd)
 					formatted = serial.format_channel(channelId, name, freq, locked)
 					channels.append(f"{formatted}")
 				if not channels:
