@@ -216,9 +216,14 @@ def format_channel(id, name, freq, locked = None):
 		locked = " " + locked
 	return f"{id} - {freq}{name}{locked}"
 
-def format_frequency(freq: str) -> str:
+def format_frequency(freq: str | float) -> str:
 	"Format frequency to be sent over protocol"
-	freq = int(float(freq) * 1e4)
+	match freq:
+		case str():
+			if freq[-3:].lower() == "mhz":
+				freq = freq[:-3]
+			freq = float(freq)
+	freq = int(freq * 1e4)
 	return f"{freq:08}"
 
 def parse_frequency(freq: str) -> str:
@@ -234,6 +239,7 @@ def sanitize_string(str: str) -> str:
 	})[:16]
 
 def replace_special_chars(str: str) -> str:
+	# TODO: figure out how to reverse this in `sanitize_string`
 	return str.translate({
 		0x10: "\N{UPWARDS ARROW}",
 		0x11: "\N{DOWNWARDS ARROW}",
