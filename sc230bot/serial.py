@@ -1,4 +1,5 @@
 import asyncio
+import time
 from typing import Optional
 
 import discord
@@ -32,13 +33,16 @@ class SerialGuard:
 		if self.typing:
 			await self.typing.__aenter__()
 		await self.lock.acquire()
+		self.lockStart = time.time()
 		open()
 		logger.debug(f"serial locked for author={self.msg.author.name!r} content={self.msg.content!r}")
 
 	async def __aexit__(self, *_):
 		close()
 		self.lock.release()
-		logger.debug("serial unlocked")
+		lockDuration = time.time() - self.lockStart
+		logger.debug(f"serial unlocked, held for {lockDuration:02f} seconds")
+
 		if self.typing:
 			await self.typing.__aexit__(*_)
 		if self.pendingMsg:
