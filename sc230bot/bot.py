@@ -315,3 +315,4 @@ async def on_message(msg: discord.Message):
 			return
 		if msg.author.id in bot.keyInputUsers:
 			await ctx.send_keys(msg.content)
+			await ctx.message.add_reaction(COMMAND_HANDLED_EMOJI)
