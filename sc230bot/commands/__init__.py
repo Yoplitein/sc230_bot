@@ -1,4 +1,5 @@
-from enum import Enum
+from dataclasses import dataclass
+from enum import Enum, Flag
 import itertools
 
 import discord
@@ -10,6 +11,130 @@ from ..bot import Sc230Context, CommandError, CommandHandled, StatusGuard, enfor
 
 logger = getLogger(__name__)
 
+class Icon1(int, Flag):
+	none = 0, "none"
+	sys = 1 << 0, "Sys"
+	s1 = 1 << 1, "1"
+	s2 = 1 << 2, "2"
+	s3 = 1 << 3, "3"
+	s4 = 1 << 4, "4"
+	s5 = 1 << 5, "5"
+	s6 = 1 << 6, "6"
+	s7 = 1 << 7, "7"
+	s8 = 1 << 8, "8"
+	s9 = 1 << 9, "9"
+	s0 = 1 << 10, "0"
+	att = 1 << 11, "Att"
+	pri = 1 << 12, "Pri"
+	keylock = 1 << 13, "Keylock"
+	batt = 1 << 14, "Batt"
+
+	def __new__(cls, value, label):
+		obj = int.__new__(cls, value)
+		obj._value_ = value
+		obj.label = label
+		return obj
+
+class Icon2(int, Flag):
+	none = 0, "none"
+	grp = 1 << 0, "Grp"
+	s1 = 1 << 1, "1"
+	s2 = 1 << 2, "2"
+	s3 = 1 << 3, "3"
+	s4 = 1 << 4, "4"
+	s5 = 1 << 5, "5"
+	s6 = 1 << 6, "6"
+	s7 = 1 << 7, "7"
+	s8 = 1 << 8, "8"
+	s9 = 1 << 9, "9"
+	s0 = 1 << 10, "0"
+	am = 1 << 11, "AM"
+	nfm = 1 << 12, "NFM"
+	fm = 1 << 13, "FM"
+	lo = 1 << 14, "L/O"
+	f = 1 << 15, "Func"
+	cc = 1 << 16, "CC"
+
+	def __new__(cls, value, label):
+		obj = int.__new__(cls, value)
+		obj._value_ = value
+		obj.label = label
+		return obj
+
+@dataclass
+class Status:
+	line1: str
+	line2: str
+	icon1: Icon1
+	icon2: Icon2
+	squelch: bool
+	mute: bool
+	weatherAlert: int
+
+	def __str__(self):
+		icon1 = " ".join(v.label for v in self.icon1) or "<no icons>"
+		icon2 = " ".join(v.label for v in self.icon2) or "<no icons>"
+		squelch = f"squelch {self.squelch and "open" or "closed"}"
+		mute = self.mute and "muted" or "unmuted"
+		weatherAlert = self.weatherAlert > 0 and f"\nWeather alert: {self.weatherAlert}" or ""
+		return f"{self.line1}\n{self.line2}\n{icon1}\n{icon2}\n{squelch}, {mute}{weatherAlert}"
+
+def parse_status(line: str) -> Status:
+	def read_fixed() -> str:
+		# status lines may contain commas
+		nonlocal line
+		res = line[:16]
+		line = line[17:]
+		return res
+	def read_to_comma() -> str:
+		nonlocal line
+		index = line.find(",")
+		if index == -1:
+			res = line
+			line = ""
+			return res
+		res = line[:index]
+		line = line[index + 1:]
+		return res
+
+	assert read_to_comma() == "STS"
+	line1 = read_fixed()
+	read_to_comma() # line 1  display mode
+	line2 = read_fixed()
+	read_to_comma() # line 2 display mode
+	icon1Str = read_to_comma()
+	icon2Str = read_to_comma()
+	read_to_comma() # reserved
+	squelch = read_to_comma()
+	mute = read_to_comma()
+	read_to_comma() # battery status
+	weatherAlert = read_to_comma()
+	logger.debug(f"{line1=} {line2=} {icon1Str=} {icon2Str=} {squelch=} {mute=} {weatherAlert=}")
+
+	line1 = line1.strip()
+	line2 = line2.strip()
+	icon1 = Icon1(0)
+	for (index, v) in enumerate(icon1Str):
+		if v == "1":
+			icon1 |= Icon1(1 << index)
+	icon2 = Icon2(0)
+	for (index, v) in enumerate(icon2Str):
+		if v == "1":
+			icon2 |= Icon2(1 << index)
+	squelch = int(squelch) != 0
+	mute = int(mute) != 0
+	weatherAlert = int(weatherAlert)
+
+	return Status(
+		line1,
+		line2,
+		icon1,
+		icon2,
+		squelch,
+		mute,
+		weatherAlert,
+	)
+
 @category("inspection")
 @bot.command(ignore_extra=False)
 async def status(_, ctx: Sc230Context):
@@ -17,14 +142,9 @@ async def status(_, ctx: Sc230Context):
 		print status lines (see also webcam)
 	"""
 	async with SerialGuard(ctx.message):
-		body = (await serial.send_raw(b"STS"))
-		(_, l1, l2, l3, l4, *_) = body.split(",")
-		l1 = l1.strip()
-		l2 = l2.strip()
-		l3 = l3.strip()
-		l4 = l4.strip()
-		[l1, l2, l3, l4] = [serial.replace_special_chars(v) for v in [l1, l2, l3, l4]]
-		await ctx.message.reply(f"```\n{l1}\n{l2}\n{l3}\n{l4}\n```")
+		line = await serial.send_raw(b"STS")
+		status = parse_status(line)
+		await ctx.reply(status)
 		raise CommandHandled
 
 @category("inspection")
