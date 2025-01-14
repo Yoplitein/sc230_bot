@@ -5,7 +5,7 @@ from typing import Optional
 import discord
 import serial as pyserial
 
-from . import config, Peekable, getLogger, UNLOCKED_EMOJI, LOCKED_EMOJI
+from .. import config, Peekable, getLogger, UNLOCKED_EMOJI, LOCKED_EMOJI
 
 logger = getLogger(__name__)
 
