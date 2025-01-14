@@ -130,12 +130,15 @@ async def name(
 	async with SerialGuard(ctx.message), ProgramGuard():
 		await serial.send_raw(f"CSP,{group},{name},,,,,,,")
 
-allBands = {
-	"Petrol/CB/Ham": ("25", "54"),
-	"Ham/Fed/Military": ("137", "174"),
-	"More Ham/Fed": ("400", "512"),
-	"Public": ("806", "956"),
-	"GHz ham": ("1240", "1300")
+supportedBands = {
+	(25.0, 54.0): ("VHF low/Petrol/CB/6m+10m ham", "VHF lo/Petrol/CB"),
+	(108.0, 174.0): ("VHF high/military/air/2m ham", "VHF hi/mil/air"),
+	(216.0, 224.98): ("1.25m ham", "1.25m ham"),
+	(400.0, 512.0): ("UHF TV/70cm ham", "UHF TV/70cm ham"),
+	(806.0, 823.9875): ("Public Service", "Public 1"),
+	(849.0125, 868.9875): ("Public Service", "Public 2"),
+	(894.0125, 956.0): ("Public Service", "Public 3"),
+	(1240.0, 1300.0): ("25cm ham", "25cm ham"),
 }
 @customsearch.command(ignore_extra=False, aliases=["all"])
 async def spectrum(ctx: Sc230Context):
@@ -145,9 +148,10 @@ async def spectrum(ctx: Sc230Context):
 	async with SerialGuard(ctx.message, typing=True):
 		async with ProgramGuard():
 			enabled = ""
-			for (group, (name, (minfreq, maxfreq))) in enumerate(allBands.items()):
+			for (group, ((minfreq, maxfreq), (_, name))) in enumerate(supportedBands.items()):
 				group += 1
 				enabled += str(group)
+				name = serial.sanitize_string(name)
 				minfreq = serial.format_frequency(minfreq)
 				maxfreq = serial.format_frequency(maxfreq)
 				await serial.send_raw(f"CSP,{group},{name},{minfreq},{maxfreq},,,,,")
@@ -159,3 +163,22 @@ async def spectrum(ctx: Sc230Context):
 			state = "".join(state)
 			await serial.send_raw(f"CSG,{state}")
 		await serial.send_keys("F+S.>E")
+
+@category("info")
+@bot.command(ignore_extra=False)
+async def spectrum(_, ctx: Sc230Context):
+	freqmins = []
+	freqmaxs = []
+	descs = []
+	for ((min, max), (description, _)) in supportedBands.items():
+		min = serial.parse_frequency(serial.format_frequency(min))
+		max = serial.parse_frequency(serial.format_frequency(max))
+		freqmins.append(min)
+		freqmaxs.append(max)
+		descs.append(description)
+
+	embed = discord.Embed()
+	embed.add_field(name="Start", value="\n".join(freqmins))
+	embed.add_field(name="End", value="\n".join(freqmaxs))
+	embed.add_field(name="Description", value="\n".join(descs))
+	await ctx.reply("The hardware supports the following bands:", embed=embed)
