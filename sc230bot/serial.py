@@ -12,10 +12,8 @@ logger = getLogger(__name__)
 allowedKeys = b"MFHSLC1234567890.E><^P"
 
 class SerialError(Exception):
-	def __init__(self, ty, msg, *rest):
-		self.ty = ty
+	def __init__(self, msg):
 		self.msg = msg
-		self.rest = rest
 
 class SerialGuard:
 	lock = asyncio.Lock()
@@ -138,14 +136,14 @@ def read_line() -> bytes:
 
 	res = res.strip()
 	match res.split(b","):
-		case [b"ERR", *rest]:
-			raise SerialError("command error", rest)
-		case [b"NG", *rest]:
-			raise SerialError("invalid state for command", rest)
-		case [b"FER", *rest]:
-			raise SerialError("framing error", rest)
-		case [b"ORER", *rest]:
-			raise SerialError("overrun error", rest)
+		case [b"ERR"]:
+			raise SerialError("command error")
+		case [b"NG"]:
+			raise SerialError("invalid state for command")
+		case [b"FER"]:
+			raise SerialError("framing error")
+		case [b"ORER"]:
+			raise SerialError("overrun error")
 		case _:
 			return res
 

@@ -238,8 +238,7 @@ async def on_command_error(ctx: Sc230Context, err: BaseException):
 				case CommandError():
 					await ctx.reply(err.msg)
 				case SerialError():
-					rest = "" if not err.rest else f"\n{rest=}"
-					await ctx.reply(f":boom: serial error: {err.ty} :boom:{rest}")
+					await ctx.reply(f":boom: serial error: {err.msg} :boom:")
 				case CommandHandled():
 					return
 				case RestartProcess():
