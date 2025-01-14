@@ -32,7 +32,7 @@ class SerialGuard:
 		await self.lock.acquire()
 		self.lockStart = time.time()
 		if pendingMsg:
-			await pendingMsg.delete()
+			asyncio.create_task(pendingMsg.delete())
 
 		if self.typing:
 			await self.typing.__aenter__()
