@@ -121,16 +121,21 @@ def close():
 def read_line() -> bytes:
 	SerialGuard.enforce()
 	res = bytes()
+	started = time.time()
 	while True:
 		read = serial.read(1)
 		if len(read) == 0:
-			import time
 			time.sleep(0.1)
+			if time.time() - started > 5:
+				err = SerialError("timed out trying to read line")
+				logger.error(f"{err.msg} ({res=})")
+				raise err
 			continue
 		res += read
 		if read == b"\r":
 			break
 	logger.debug(f"serial read  {res!r}")
+
 	res = res.strip()
 	match res.split(b","):
 		case [b"ERR", *rest]:
