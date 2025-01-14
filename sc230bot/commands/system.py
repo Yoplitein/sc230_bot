@@ -36,9 +36,9 @@ async def list_(ctx: Sc230Context):
 				case resp:
 					logger.warning(f"weird response for system {id}: {resp!r}")
 		if systems:
-			await ctx.message.reply("\n".join(systems))
+			await ctx.reply("\n".join(systems))
 		else:
-			await ctx.message.reply("no systems found")
+			await ctx.reply("no systems found")
 		raise CommandHandled
 
 @system.command(ignore_extra=False)
@@ -53,7 +53,7 @@ async def add(ctx: Sc230Context, *, name: str = commands.parameter(default="", d
 		if name:
 			name = serial.sanitize_string(name)
 			await serial.send_raw(f"SIN,{id},{name},,,,,,,")
-		await ctx.message.reply(f"created new system with id {id}")
+		await ctx.reply(f"created new system with id {id}")
 		raise CommandHandled
 
 @system.command(ignore_extra=False, aliases=["del"])

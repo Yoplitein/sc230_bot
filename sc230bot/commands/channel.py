@@ -48,9 +48,9 @@ async def list_(ctx: Sc230Context, groupId: int = commands.parameter(displayed_n
 			embed = discord.Embed()
 			embed.add_field(name="", value=col1)
 			embed.add_field(name="", value=col2)
-			await ctx.message.reply(f"## {groupName}", embed=embed)
+			await ctx.reply(f"## {groupName}", embed=embed)
 		else:
-			await ctx.message.reply("no channels found")
+			await ctx.reply("no channels found")
 
 		raise CommandHandled
 
@@ -128,7 +128,7 @@ async def add(
 			errors = f"\n{"\n".join(errors)}"
 		else:
 			errors = ""
-		await ctx.message.reply(f"created {len(frequencies) - numErrors} new channels out of {len(frequencies)} given{errors}")
+		await ctx.reply(f"created {len(frequencies) - numErrors} new channels out of {len(frequencies)} given{errors}")
 		raise CommandHandled
 
 @channel.command(ignore_extra=False, aliases=["del"])

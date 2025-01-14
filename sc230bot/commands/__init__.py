@@ -222,9 +222,9 @@ async def tree(_, ctx: Sc230Context):
 			if noGroups:
 				embed.add_field(name="", value="no groups")
 	if not systems:
-		await ctx.message.reply("no systems")
+		await ctx.reply("no systems")
 	for batch in itertools.batched(systems, 10):
-		await ctx.message.reply(embeds=batch)
+		await ctx.reply(embeds=batch)
 	raise CommandHandled
 
 @category("inspection")
@@ -252,7 +252,7 @@ async def locked(_, ctx: Sc230Context):
 				for channelId in await walk_ids(chanHead, chanTail):
 					(_, name, freq, *_) = (await serial.send_raw(f"CIN,{channelId}")).split(",")
 					lines.append(f"* {serial.format_channel(channelId, name, freq)}")
-		await ctx.message.reply("\n".join(lines))
+		await ctx.reply("\n".join(lines))
 		raise CommandHandled
 
 class SearchOption(str, Enum):
@@ -335,7 +335,7 @@ async def lockout(_, ctx: Sc230Context, *, frequencies: str):
 			errs = f", {errs} out of band"
 		else:
 			errs = ""
-		await ctx.message.reply(f"locked {locked} freqs{errs}")
+		await ctx.reply(f"locked {locked} freqs{errs}")
 
 @category("locking")
 @bot.command(ignore_extra=False)

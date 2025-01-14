@@ -37,9 +37,9 @@ async def list_(ctx: Sc230Context, systemId: int = commands.parameter(displayed_
 					logger.debug(f"weird response for group {id}: {resp!r}")
 		if groups:
 			groups = "\n".join(groups)
-			await ctx.message.reply(f"## {systemName}\n{groups}")
+			await ctx.reply(f"## {systemName}\n{groups}")
 		else:
-			await ctx.message.reply("no groups found")
+			await ctx.reply("no groups found")
 
 		raise CommandHandled
 
@@ -62,7 +62,7 @@ async def add(
 			raise CommandError("could not create group")
 		if name:
 			await serial.send_raw(f"GIN,{id},{name},,")
-		await ctx.message.reply(f"created new group with id {id}")
+		await ctx.reply(f"created new group with id {id}")
 		raise CommandHandled
 
 @group.command(ignore_extra=False, aliases=["del"])

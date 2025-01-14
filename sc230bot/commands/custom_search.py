@@ -81,7 +81,7 @@ async def list_(ctx: Sc230Context):
 					lines.append(f"  * {minfreq} to {maxfreq}")
 				case resp:
 					raise CommandError(f"unexpected response {resp=}")
-		await ctx.message.reply("\n".join(lines))
+		await ctx.reply("\n".join(lines))
 		raise CommandHandled
 
 @customsearch.command(ignore_extra=False, aliases=["freq"])
