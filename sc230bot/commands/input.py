@@ -76,10 +76,10 @@ async def keyon(_, ctx: Sc230Context):
 
 		see `key` command's help for list of keycodes
 	"""
-	if isRawInputUser(ctx.author.id):
-		raise CommandError("you are already in raw input mode")
 	if isKeyInputUser(ctx.author.id):
 		raise CommandError("you are already in key input mode")
+	if isRawInputUser(ctx.author.id):
+		await ctx.reply("**note**: you are already in raw input mode, which supersedes key input mode")
 	addKeyInputUser(ctx.author.id)
 
 @category("input")
@@ -114,7 +114,7 @@ async def rawon(_, ctx: Sc230Context):
 	if isRawInputUser(ctx.author.id):
 		raise CommandError("you are already in raw input mode")
 	if isKeyInputUser(ctx.author.id):
-		raise CommandError("you are already in key input mode")
+		await ctx.reply("**note**: you are already in key input mode, which is superseded by raw input mode")
 	addRawInputUser(ctx.author.id)
 
 @category("input")
