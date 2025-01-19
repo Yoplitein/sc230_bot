@@ -309,8 +309,16 @@ async def on_message(msg: discord.Message):
 		from .commands import input
 		ctx = await bot.get_context(msg)
 		if input.isRawInputUser(msg.author.id):
-			await ctx.send_raw(msg.content.split("\n"))
+			try:
+				await ctx.send_raw(msg.content.split("\n"))
+			except Exception as err:
+				await ctx.message.add_reaction(COMMAND_FAILED_EMOJI)
+				await ctx.reply(f"sending raw failed due to `{type(err).__name__}`: {err}")
 			return
 		if input.isKeyInputUser(msg.author.id):
-			await ctx.send_keys(msg.content)
-			await ctx.message.add_reaction(COMMAND_HANDLED_EMOJI)
+			try:
+				await ctx.send_keys(msg.content)
+				await ctx.message.add_reaction(COMMAND_HANDLED_EMOJI)
+			except Exception as err:
+				await ctx.message.add_reaction(COMMAND_FAILED_EMOJI)
+				await ctx.reply(f"sending keycodes failed due to `{type(err).__name__}`: {err}")
