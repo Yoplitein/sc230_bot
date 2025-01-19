@@ -1,3 +1,4 @@
+import sqlite3
 import discord
 from discord.ext import commands
 
@@ -5,6 +6,40 @@ from . import logger
 from .. import config, serial, getLogger, UNLOCKED_EMOJI, LOCKED_EMOJI, category
 from ..bot import Sc230Context, CommandError, BadSubcommandError, CommandHandled, StatusGuard, enforce_is_admin, bot
 from ..serial import ProgramGuard, SerialError, SerialGuard, walk_ids
+
+db = sqlite3.connect("./input_users.db")
+with db:
+	if db.execute("SELECT count() FROM sqlite_schema").fetchone() == (0,):
+		db.executescript("""
+			CREATE TABLE keyusers (
+				id INT PRIMARY KEY
+			) WITHOUT ROWID;
+			CREATE TABLE rawusers (
+				id INT PRIMARY KEY
+			) WITHOUT ROWID;
+		""")
+
+def isKeyInputUser(id: int):
+	return db.execute("SELECT count() FROM keyusers WHERE id = ?", (id,)).fetchone() == (1,)
+
+def addKeyInputUser(id: int):
+	with db:
+		db.execute("INSERT INTO keyusers VALUES(?)", (id,))
+
+def removeKeyInputUser(id: int):
+	with db:
+		db.execute("DELETE FROM keyusers WHERE id = ?", (id,))
+
+def isRawInputUser(id: int):
+	return db.execute("SELECT count() FROM rawusers WHERE id = ?", (id,)).fetchone() == (1,)
+
+def addRawInputUser(id: int):
+	with db:
+		db.execute("INSERT INTO rawusers VALUES(?)", (id,))
+
+def removeRawInputUser(id: int):
+	with db:
+		db.execute("DELETE FROM rawusers WHERE id = ?", (id,))
 
 @category("input")
 @bot.command(ignore_extra=False)
@@ -41,11 +76,11 @@ async def keyon(_, ctx: Sc230Context):
 
 		see `key` command's help for list of keycodes
 	"""
-	if ctx.author.id in bot.rawInputUsers:
+	if isRawInputUser(ctx.author.id):
 		raise CommandError("you are already in raw input mode")
-	if ctx.author.id in bot.keyInputUsers:
+	if isKeyInputUser(ctx.author.id):
 		raise CommandError("you are already in key input mode")
-	bot.keyInputUsers.add(ctx.author.id)
+	addKeyInputUser(ctx.author.id)
 
 @category("input")
 @bot.command(ignore_extra=False)
@@ -53,9 +88,9 @@ async def keyoff(_, ctx: Sc230Context):
 	"""
 		disable keycode messages mode
 	"""
-	if ctx.author.id not in bot.keyInputUsers:
+	if not isKeyInputUser(ctx.author.id):
 		raise CommandError("you are not in key input mode")
-	bot.keyInputUsers.remove(ctx.author.id)
+	removeKeyInputUser(ctx.author.id)
 
 @category("input")
 @bot.command(ignore_extra=False)
@@ -76,11 +111,11 @@ async def rawon(_, ctx: Sc230Context):
 		enable treating all non-command messages as raw protocol data
 	"""
 	enforce_is_admin(ctx.author)
-	if ctx.author.id in bot.rawInputUsers:
+	if isRawInputUser(ctx.author.id):
 		raise CommandError("you are already in raw input mode")
-	if ctx.author.id in bot.keyInputUsers:
+	if isKeyInputUser(ctx.author.id):
 		raise CommandError("you are already in key input mode")
-	bot.rawInputUsers.add(ctx.author.id)
+	addRawInputUser(ctx.author.id)
 
 @category("input")
 @bot.command(ignore_extra=False)
@@ -88,6 +123,6 @@ async def rawoff(_, ctx: Sc230Context):
 	"""
 		disable raw protocol messages mode
 	"""
-	if ctx.author.id not in bot.rawInputUsers:
+	if not isRawInputUser(ctx.author.id):
 		raise CommandError("you are not in raw input mode")
-	bot.rawInputUsers.remove(ctx.author.id)
+	removeRawInputUser(ctx.author.id)

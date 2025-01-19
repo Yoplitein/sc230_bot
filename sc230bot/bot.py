@@ -69,9 +69,6 @@ class Sc230Bot(commands.Bot):
 		self.help_command.command_attrs["help"] = "helps u bro"
 		logger.debug(f"{self.help_command.command_attrs=}")
 
-		self.rawInputUsers = set()
-		self.keyInputUsers = set()
-
 	async def get_context(self, msg):
 		return await super().get_context(msg, cls=Sc230Context)
 
@@ -309,10 +306,11 @@ async def on_message(msg: discord.Message):
 	if prefixed:
 		await bot.process_commands(msg)
 	else:
+		from .commands import input
 		ctx = await bot.get_context(msg)
-		if msg.author.id in bot.rawInputUsers:
+		if input.isRawInputUser(msg.author.id):
 			await ctx.send_raw(msg.content.split("\n"))
 			return
-		if msg.author.id in bot.keyInputUsers:
+		if input.isKeyInputUser(msg.author.id):
 			await ctx.send_keys(msg.content)
 			await ctx.message.add_reaction(COMMAND_HANDLED_EMOJI)
