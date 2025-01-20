@@ -1,10 +1,12 @@
+from typing import Optional
 import discord
 from discord.ext import commands
 
 from . import logger
 from .. import config, serial, getLogger, UNLOCKED_EMOJI, LOCKED_EMOJI, category
 from ..bot import Sc230Context, CommandError, BadSubcommandError, CommandHandled, StatusGuard, enforce_is_admin, bot
-from ..serial import ProgramGuard, SerialError, SerialGuard, walk_ids
+from ..serial import ProgramGuard, SerialError, SerialGuard
+from ..serial.messages import CSGroupFlag, CSGroupId, CustomSearchGroup, EnabledCSGroups, Modulation, SearchStep
 
 @category("scanning")
 @bot.command(ignore_extra=False)
@@ -19,14 +21,22 @@ async def freqrange(
 
 		overrides custom search group 0
 	"""
-	minfreq = serial.format_frequency(minfreq)
-	maxfreq = serial.format_frequency(maxfreq)
-	username = f"${serial.sanitize_string(ctx.author.display_name)}"
+	name = "$" + ctx.author.display_name
 	async with SerialGuard(ctx.message):
 		async with ProgramGuard():
-			await serial.send_raw(f"CSG,{"1" * 9}0")
-			await serial.send_raw(f"CSP,0,{username},{minfreq},{maxfreq},0,AUTO,0,2,0")
-		await serial.send_keys(b"F+S.>E")
+			await serial.send_message(CustomSearchGroup(
+				id=CSGroupId.group0,
+				name=name,
+				min=minfreq,
+				max=maxfreq,
+				step=SearchStep.auto,
+				modulation=Modulation.auto,
+				attenuation=False,
+				delay=2,
+				dataSkip=False
+			), update=True)
+			await serial.send_message(EnabledCSGroups(enabled=CSGroupFlag.group0))
+		await serial.send_keys("F+S.>E")
 
 @category("scanning")
 @bot.group(invoke_without_command=True, aliases=["cs"])
@@ -53,34 +63,49 @@ async def scan(
 	groups = groups.replace(" ", "")
 	if not all(v in "0123456789" for v in groups):
 		raise CommandError("search groups must be given as numbers 0-9")
+	groups = CSGroupFlag.from_digits(groups)
 
 	async with SerialGuard(ctx.message):
 		async with ProgramGuard():
-			state = list("1" * 10)
-			for v in groups:
-				v = int(v)
-				state[v - 1] = "0"
-			state = "".join(state)
-			await serial.send_raw(f"CSG,{state}")
+			await serial.send_message(EnabledCSGroups(enabled=groups))
 		await serial.send_keys("F+S.>E")
 
+@customsearch.command(ignore_extra=False)
+async def enabled(ctx: Sc230Context):
+	"""
+		print which custom search groups are currently enabled
+	"""
+	async with SerialGuard(ctx.message), ProgramGuard():
+		resp = await serial.send_message(EnabledCSGroups(), query=True)
+		if resp.enabled != CSGroupFlag.none:
+			enabled = ", ".join(str(v.id.value) for v in resp.enabled)
+			msg = f"custom search group(s) {enabled} are enabled"
+		else:
+			msg = "no custom search groups are enabled"
+		await ctx.reply(msg)
+
 @customsearch.command(name="list", ignore_extra=False, aliases=["ls"])
-async def list_(ctx: Sc230Context):
+async def list_(ctx: Sc230Context, *, groups: Optional[str]):
 	"""
 		print custom search groups
 	"""
+	if groups is None:
+		from functools import reduce
+		groups = reduce(lambda l, r: l | r, CSGroupFlag)
+	else:
+		groups = CSGroupFlag.from_digits(groups.replace(" ", ""))
+
 	async with SerialGuard(ctx.message), ProgramGuard():
 		lines = []
-		for id in range(10):
-			id = (id + 1) % 10
-			match (await serial.send_raw(f"CSP,{id}")).split(","):
-				case ["CSP", name, minfreq, maxfreq, *_]:
-					minfreq = serial.parse_frequency(minfreq)
-					maxfreq = serial.parse_frequency(maxfreq)
-					lines.append(f"* {id} - {name}")
-					lines.append(f"  * {minfreq} to {maxfreq}")
-				case resp:
-					raise CommandError(f"unexpected response {resp=}")
+		for group in groups:
+			group = await serial.send_message(CustomSearchGroup(id=group.id), query=True)
+			modulation = "auto" if group.modulation == Modulation.auto else group.modulation.value
+			lines.append(f"* {group.id.value} - **{group.name}**")
+			lines.append(f"  * **{group.min}** to **{group.max}**")
+			lines.append(f"  * **frequency step**: {group.step}")
+			lines.append(f"  * **modulation**: {modulation}")
+			lines.append(f"  * **attenuation**: {group.attenuation and "on" or "off"}")
+			lines.append(f"  * **data skip**: {group.dataSkip and "on" or "off"}")
 		await ctx.reply("\n".join(lines))
 		raise CommandHandled
 
@@ -104,10 +129,9 @@ async def frequency(
 	"""
 	if group < 0 or group > 9:
 		raise CommandError("search groups must be given as numbers 0-9")
-	minfreq = serial.format_frequency(minfreq)
-	maxfreq = serial.format_frequency(maxfreq)
+	group = CSGroupId(group)
 	async with SerialGuard(ctx.message), ProgramGuard():
-		await serial.send_raw(f"CSP,{group},,{minfreq},{maxfreq},,,,,")
+		await serial.send_message(CustomSearchGroup(id=group, min=minfreq, max=maxfreq), update=True)
 
 @customsearch.command(ignore_extra=False)
 async def name(
@@ -126,9 +150,9 @@ async def name(
 	"""
 	if group < 0 or group > 9:
 		raise CommandError("search groups must be given as numbers 0-9")
-	name = serial.sanitize_string(name)
+	group = CSGroupId(group)
 	async with SerialGuard(ctx.message), ProgramGuard():
-		await serial.send_raw(f"CSP,{group},{name},,,,,,,")
+		await serial.send_message(CustomSearchGroup(id=group, name=name), update=True)
 
 supportedBands = {
 	(25.0, 54.0): ("VHF low/Petrol/CB/6m+10m ham", "VHF lo/Petrol/CB"),
@@ -147,21 +171,20 @@ async def spectrum(ctx: Sc230Context):
 	"""
 	async with SerialGuard(ctx.message, typing=True):
 		async with ProgramGuard():
-			enabled = ""
 			for (group, ((minfreq, maxfreq), (_, name))) in enumerate(supportedBands.items()):
 				group += 1
-				enabled += str(group)
-				name = serial.sanitize_string(name)
-				minfreq = serial.format_frequency(minfreq)
-				maxfreq = serial.format_frequency(maxfreq)
-				await serial.send_raw(f"CSP,{group},{name},{minfreq},{maxfreq},,,,,")
-
-			state = list("1" * 10)
-			for v in enabled:
-				v = int(v)
-				state[v - 1] = "0"
-			state = "".join(state)
-			await serial.send_raw(f"CSG,{state}")
+				await serial.send_message(CustomSearchGroup(
+					id=CSGroupId(group),
+					name=name,
+					min=minfreq,
+					max=maxfreq,
+					step=SearchStep.auto,
+					modulation=Modulation.auto,
+					attenuation=False,
+					delay=2,
+					dataSkip=False,
+				))
+			await serial.send_message(EnabledCSGroups(enabled=CSGroupFlag.group0))
 		await serial.send_keys("F+S.>E")
 
 @category("info")
@@ -171,8 +194,8 @@ async def spectrum(_, ctx: Sc230Context):
 	freqmaxs = []
 	descs = []
 	for ((min, max), (description, _)) in supportedBands.items():
-		min = serial.parse_frequency(serial.format_frequency(min))
-		max = serial.parse_frequency(serial.format_frequency(max))
+		min = serial.parse_frequency(serial.format_frequency(min), pretty=True)
+		max = serial.parse_frequency(serial.format_frequency(max), pretty=True)
 		freqmins.append(min)
 		freqmaxs.append(max)
 		descs.append(description)

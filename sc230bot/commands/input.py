@@ -5,7 +5,7 @@ from discord.ext import commands
 from . import logger
 from .. import config, serial, getLogger, UNLOCKED_EMOJI, LOCKED_EMOJI, category
 from ..bot import Sc230Context, CommandError, BadSubcommandError, CommandHandled, StatusGuard, enforce_is_admin, bot
-from ..serial import ProgramGuard, SerialError, SerialGuard, walk_ids
+from ..serial import ProgramGuard, SerialError, SerialGuard
 
 db = sqlite3.connect("./input_users.db")
 with db:

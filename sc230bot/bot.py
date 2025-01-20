@@ -113,7 +113,7 @@ class Sc230Context(commands.Context[Sc230Bot]):
 	async def send_keys(self, keys: str):
 		async with SerialGuard(self.message):
 			keys = keys.replace("\n", "").replace(" ", "").upper()
-			await serial.send_keys(keys.encode("ascii"))
+			await serial.send_keys(keys)
 
 class StatusGuard:
 	def __init__(

@@ -1,11 +1,14 @@
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field, fields, is_dataclass
+from dataclasses import asdict, dataclass, field, fields, is_dataclass
 import dataclasses
-from enum import Enum
-from typing import Any, Literal, Type, override
+from enum import Enum, Flag
+from logging import getLogger
+from typing import Any, Literal, Optional, Self, Type, Union, override
 import typing
 
 from .. import serial
+
+logger = getLogger(__name__)
 
 class ProtocolMessage(ABC):
 	@staticmethod
@@ -13,156 +16,275 @@ class ProtocolMessage(ABC):
 	def command_name() -> str:
 		...
 
-	def write(self) -> str:
+	def write(self, *, query = False) -> str:
 		assert is_dataclass(self)
 
-		values = [self.command_name()]
-		for field in fields(self):
+		msg = self
+		if hasattr(msg, "pre_write"):
+			msg = type(self)(**asdict(self))
+			msg.pre_write(query=query)
+
+		if query:
+			# certain commands have separate forms when retrieving data vs updating it
+			# system/group/channel info commands pass an id when querying, else just the command name
+			if hasattr(msg, "id"):
+				assert msg.id is not None
+				ty = next(v.type for v in fields(self) if v.name == "id")
+				id = format_value(ty, msg.id)
+				return f"{msg.command_name()},{id}"
+			return msg.command_name()
+
+		values = [msg.command_name()]
+		for field in fields(msg):
 			if not field.metadata["write"]:
 				continue
-			match getattr(self, field.name):
-				case None:
-					values.append("")
-				case value:
-					values.append(format_value(field.type, value))
+			value = getattr(msg, field.name)
+			value = format_value(field.type, value)
+			values.append(value)
 		return ",".join(values)
 
 	@classmethod
-	def read[Msg](msg: Type[Msg], line: str) -> Msg:
-		assert is_dataclass(msg)
+	def read[M](Msg: Type[M], line: str, *, update = False) -> M:
+		assert is_dataclass(Msg)
 
 		values = line.strip().split(",")
 		match values.pop(0):
-			case v if v == msg.command_name():
+			case v if v == Msg.command_name():
 				pass
-			case name:
-				assert False, f"expected command name {msg.command_name()} but got {name}"
+			case otherCommand:
+				assert False, f"expected command name {Msg.command_name()} but got {otherCommand}"
 
-		pairs = {}
-		fieldIndex = 0
-		for field in fields(msg):
-			if not field.metadata["read"]:
+		if update:
+			match values.pop(0):
+				case "OK" if len(values) == 0:
+					pass
+				case other:
+					values.insert(0, other)
+					assert False, f"expecting update ack but have remaining values: `{",".join(values)}`"
+			return
+
+		msgFields = {
+			field.name: field
+			for field in fields(Msg)
+		}
+		result = {}
+		populatedFields = set()
+		for fieldName, info in msgFields.items():
+			if not info.metadata["read"]:
 				continue
-			value = parse_value(field.type, values[fieldIndex])
-			fieldIndex += 1
-			pairs[field.name] = value
-		return msg(**pairs)
+			populatedFields.add(fieldName)
+			try:
+				result[fieldName] = values.pop(0)
+			except IndexError as cause:
+				err = serial.SerialError(f"couldn't read {Msg.__name__!r} ({Msg.command_name()!r}) because no values left when trying to read field {fieldName!r}")
+				err.add_note(f"parsing line {line!r} {update=}")
+				raise err from cause
+		result = Msg(**result)
 
-def protocol_field(*, read=False, write=False, **kwargs) -> dataclasses.Field:
+		if hasattr(result, "pre_read"):
+			result.pre_read()
+		for fieldName in populatedFields:
+			type = msgFields[fieldName].type
+			value = getattr(result, fieldName)
+			try:
+				value = parse_value(type, value)
+			except Exception as err:
+				err.add_note(f"while trying to parse field {fieldName!r} of {Msg.__name__!r} ({Msg.command_name()!r})")
+				raise err
+			setattr(result, fieldName, value)
+		if hasattr(result, "post_read"):
+			result.post_read()
+		return result
+
+type MemoryId = int
+
+def protocol_field(*, read=False, write=False, **fieldKwargs) -> dataclasses.Field:
 	assert read or write, "protocol fields must be at least one of read or write, or both"
-	f = field(default=None, **kwargs, kw_only=True, metadata=dict(read=read, write=write))
+	kwargs = dict(
+		default=None,
+		kw_only=True,
+		metadata=dict(read=read, write=write)
+	)
+	kwargs.update(fieldKwargs)
+	f = field(**kwargs)
 	return f
 
-def format_value[T](ty: Type[T], value: T) -> str:
+def format_value[T](expectedType: Type[T], value: T) -> str:
 	if value is None:
 		return ""
-	if isinstance(ty, typing.TypeAliasType):
-		ty = ty.__value__
-	if getattr(ty, "__origin__", None) == Literal:
-		allowed = ty.__args__
+
+	if isinstance(expectedType, typing.TypeAliasType):
+		expectedType = expectedType.__value__
+	if getattr(expectedType, "__origin__", None) == Literal:
+		allowed = expectedType.__args__
 		for v in allowed:
 			if value == v:
 				return v
 		raise ValueError(f"formatting field with literal type and got {value!r} when expecting one of {", ".join(map(lambda v: repr(str(v)), allowed))}")
-	if issubclass(ty, Enum):
-		return str(value.value)
-	if ty == str:
-		return serial.sanitize_string(value)
-	if ty == int:
-		return str(value)
-	if ty == float:
-		return serial.format_frequency(value)
-	if ty == bool:
-		return f"{value & 1}"
-	raise TypeError(f"don't know how to format {ty.__name__} for protocol")
+	realType = type(value)
+	if getattr(expectedType, "__origin__", None) == Union:
+		variants = expectedType.__args__
+		for variant in variants:
+			if variant is realType:
+				return format_value(variant, value)
+		raise ValueError(f"formatting field with union type {expectedType} but none match for value {value!r}")
+	assert realType is expectedType, f"expecting {expectedType} but got {realType} when formatting value {value!r}"
 
-def parse_value[T](ty: Type[T], value: str) -> T:
+	if issubclass(expectedType, Flag):
+		bits = len(bin(max(v.value for v in expectedType))[2:])
+		return f"{value.value:0{bits}b}"
+	if issubclass(expectedType, Enum):
+		return str(value.value)
+
+	if expectedType == str:
+		return serial.sanitize_string(value)
+	if expectedType == int:
+		return str(value)
+	if expectedType == float:
+		return serial.format_frequency(value)
+	if expectedType == bool:
+		return f"{value & 1}"
+
+	raise TypeError(f"don't know how to format {expectedType.__name__} for protocol")
+
+def parse_value[T](expectedType: Type[T], value: str) -> T:
 	if value == "":
 		return None
-	if isinstance(ty, typing.TypeAliasType):
-		ty = ty.__value__
-	if getattr(ty, "__origin__", None) == Literal:
-		allowed = ty.__args__
+
+	if isinstance(expectedType, typing.TypeAliasType):
+		expectedType = expectedType.__value__
+	if getattr(expectedType, "__origin__", None) == Literal:
+		allowed = expectedType.__args__
 		for v in allowed:
 			if str(v) == value:
 				return v
 		raise ValueError(f"parsing field with literal type and got {value!r} when expecting one of {", ".join(map(lambda v: repr(str(v)), allowed))}")
-	if issubclass(ty, Enum):
-		valueTy = ty.mro()[1]
-		assert valueTy is not Enum, f"enum type {ty.__name__} does not specify the type of its values"
+	if getattr(expectedType, "__origin__", None) == Union:
+		variants = expectedType.__args__
+		for variant in variants:
+			try:
+				return parse_value(variant, value)
+			except:
+				pass
+		raise ValueError(f"parsing field with union type {expectedType} but none match for value {value!r}")
+
+	if issubclass(expectedType, Flag):
+		try:
+			value = int(value, 2)
+		except Exception as err:
+			err.add_note(f"when parsing {value!r}")
+			raise err
+		return expectedType(value)
+	if issubclass(expectedType, Enum):
+		valueTy = expectedType.mro()[1]
+		assert valueTy is not Enum, f"enum type {expectedType.__name__} does not specify the type of its values"
 		value = valueTy(value)
-		return ty(value)
-	if ty == str:
+		return expectedType(value)
+
+	if expectedType == str:
 		return serial.replace_special_chars(value)
-	if ty == int:
-		return ty(value)
-	if ty == float:
+	if expectedType == int:
+		return expectedType(value)
+	if expectedType == float:
 		return serial.parse_frequency(value)
-	if ty == bool:
+	if expectedType == bool:
 		match value.lower():
 			case "0":
 				return False
 			case "1":
-				return False
+				return True
 			case _:
 				raise ValueError(f"given unrecognized value `{value!r}` for bool field")
-	raise TypeError(f"don't know how to format {ty.__name__} for protocol")
 
-type MemoryId = int
+	raise TypeError(f"don't know how to format {expectedType.__name__} for protocol")
 
-class QuickKey(str, Enum):
-	none = "."
-	key1 = "1"
-	key2 = "2"
-	key3 = "3"
-	key4 = "4"
-	key5 = "5"
-	key6 = "6"
-	key7 = "7"
-	key8 = "8"
-	key9 = "9"
+class KeyCode(str, Enum):
+	menu = 'M'
+	function = 'F'
+	hold = 'H'
+	scan = 'S'
+	lockout = 'L'
+	car = 'C'
+	key1 = '1'
+	key2 = '2'
+	key3 = '3'
+	key4 = '4'
+	key5 = '5'
+	key6 = '6'
+	key7 = '7'
+	key8 = '8'
+	key9 = '9'
+	key0 = '0'
+	no = '.'
+	enter = 'E'
+	right = '>'
+	left = '<'
+	enter2 = '^'
+	power = 'P'
+
+class KeyState(str, Enum):
+	press = 'P'
+	longPress = 'L'
+	hold = 'H'
+	release = 'R'
 
 @dataclass
-class System(ProtocolMessage):
-	id: MemoryId = protocol_field(write=True)
-	type: Literal["CNV"] = protocol_field(read=True)
-	name: str = protocol_field(read=True, write=True)
-	quickKey: QuickKey = protocol_field(read=True, write=True)
-	holdTime: int = protocol_field(read=True, write=True)
-	lockout: bool = protocol_field(read=True, write=True)
-	reserved: Literal[None] = protocol_field(read=True, write=True)
-	delayTime: int = protocol_field(read=True, write=True)
-	dataSkip: bool = protocol_field(read=True, write=True)
-	emergencyAlert: bool = protocol_field(read=True, write=True)
-	revIndex: MemoryId = protocol_field(read=True)
-	fwdIndex: MemoryId = protocol_field(read=True)
-	groupHead: MemoryId = protocol_field(read=True)
-	groupTail: MemoryId = protocol_field(read=True)
-	sequence: int = protocol_field(read=True)
+class Key(ProtocolMessage):
+	ack: Literal["OK"] = protocol_field(read=True)
+	keycode: KeyCode = protocol_field(write=True)
+	state: KeyState = protocol_field(write=True)
+
+	def __post_init__(self):
+		if self.keycode is not None and self.state is None:
+			self.state = KeyState.press
 
 	@override
 	@staticmethod
 	def command_name():
-		return "SIN"
+		return "KEY"
 
 @dataclass
-class Group(ProtocolMessage):
-	id: MemoryId = protocol_field(write=True)
-	type: Literal["C", None] = protocol_field(read=True)
-	name: str = protocol_field(read=True, write=True)
-	quickKey: QuickKey = protocol_field(read=True, write=True)
-	lockout: bool = protocol_field(read=True, write=True)
-	revIndex: MemoryId = protocol_field(read=True)
-	fwdIndex: MemoryId = protocol_field(read=True)
-	sysIndex: MemoryId = protocol_field(read=True)
-	chanHead: MemoryId = protocol_field(read=True)
-	chanTail: MemoryId = protocol_field(read=True)
-	sequence: int = protocol_field(read=True)
+class MemoryUsage(ProtocolMessage):
+	percentage: int = protocol_field(read=True)
 
 	@override
 	@staticmethod
 	def command_name():
-		return "GIN"
+		return "MEM"
+
+@dataclass
+class MemoryBlocks(ProtocolMessage):
+	free: int = protocol_field(read=True)
+
+	@override
+	@staticmethod
+	def command_name():
+		return "RMB"
+
+@dataclass
+class FactoryReset(ProtocolMessage):
+	@override
+	@staticmethod
+	def command_name():
+		return "CLR"
+
+@dataclass
+class EnterProgramming(ProtocolMessage):
+	ack: Literal["OK"] = protocol_field(read=True)
+
+	@override
+	@staticmethod
+	def command_name():
+		return "PRG"
+
+@dataclass
+class ExitProgramming(ProtocolMessage):
+	ack: Literal["OK"] = protocol_field(read=True)
+
+	@override
+	@staticmethod
+	def command_name():
+		return "EPG"
 
 class SearchStep(int, Enum):
 	auto = 0, "auto"
@@ -194,7 +316,313 @@ class Modulation(str, Enum):
 	fm = "FM"
 	nfm = "NFM"
 
-class SquelchMode(int, Enum):
+@dataclass
+class QuickSearch(ProtocolMessage):
+	ack: Literal["OK"] = protocol_field(read=True)
+	frequency: float = protocol_field(write=True)
+	step: SearchStep = protocol_field(write=True)
+	modulation: Modulation = protocol_field(write=True)
+	attenuation: bool = protocol_field(write=True)
+	delay: int = protocol_field(write=True)
+	dataSkip: bool = protocol_field(write=True)
+	squelchCodeSearch: bool = protocol_field(write=True)
+	pagerSkip: bool = protocol_field(write=True)
+	repeaterFind: bool = protocol_field(write=True)
+
+	@override
+	@staticmethod
+	def command_name():
+		return "QSH"
+
+class CSGroupId(int, Enum):
+	group1 = 1
+	group2 = 2
+	group3 = 3
+	group4 = 4
+	group5 = 5
+	group6 = 6
+	group7 = 7
+	group8 = 8
+	group9 = 9
+	group0 = 0
+
+@dataclass
+class CustomSearchGroup(ProtocolMessage):
+	id: CSGroupId = protocol_field(write=True)
+	name: str = protocol_field(read=True, write=True)
+	min: float = protocol_field(read=True, write=True)
+	max: float = protocol_field(read=True, write=True)
+	step: SearchStep = protocol_field(read=True, write=True)
+	modulation: Modulation = protocol_field(read=True, write=True)
+	attenuation: bool = protocol_field(read=True, write=True)
+	delay: int = protocol_field(read=True, write=True)
+	dataSkip: bool = protocol_field(read=True, write=True)
+
+	@override
+	@staticmethod
+	def command_name():
+		return "CSP"
+
+class CSGroupFlag(int, Flag):
+	none = 0, None
+	group1 = 1 << 9, CSGroupId.group1
+	group2 = 1 << 8, CSGroupId.group2
+	group3 = 1 << 7, CSGroupId.group3
+	group4 = 1 << 6, CSGroupId.group4
+	group5 = 1 << 5, CSGroupId.group5
+	group6 = 1 << 4, CSGroupId.group6
+	group7 = 1 << 3, CSGroupId.group7
+	group8 = 1 << 2, CSGroupId.group8
+	group9 = 1 << 1, CSGroupId.group9
+	group0 = 1 << 0, CSGroupId.group0
+
+	def __new__(cls, value, id):
+		obj = int.__new__(cls, value)
+		obj._value_ = value
+		obj.id = id
+		return obj
+
+	@classmethod
+	def from_digits(Self, digits: str):
+		all = list(Self)
+		value = Self.none
+		for digit in digits:
+			assert digit in "1234567890", "search groups must be given as numbers 0-9"
+			digit = int(digit)
+			value |= all[digit - 1]
+		return value
+
+@dataclass
+class EnabledCSGroups(ProtocolMessage):
+	enabled: Literal["OK"] | CSGroupFlag = protocol_field(read=True, write=True)
+
+	@override
+	@staticmethod
+	def command_name():
+		return "CSG"
+
+	def pre_write(self, query):
+		if self.enabled is not None:
+			# protocol makes unfortunate choice here; with a zero indicating enabled
+			self.enabled = ~self.enabled
+
+	def post_read(self):
+		if self.enabled != "OK":
+			self.enabled = ~self.enabled
+
+@dataclass
+class AddGlobalLockout(ProtocolMessage):
+	ack: Literal["OK"] = protocol_field(read=True)
+	frequency: float = protocol_field(write=True)
+
+	@override
+	@staticmethod
+	def command_name():
+		return "LOF"
+
+@dataclass
+class RemoveGlobalLockout(ProtocolMessage):
+	ack: Literal["OK"] = protocol_field(read=True)
+	frequency: float = protocol_field(write=True)
+
+	@override
+	@staticmethod
+	def command_name():
+		return "ULF"
+
+@dataclass
+class GetGlobalLockouts(ProtocolMessage):
+	frequency: float = protocol_field(read=True)
+
+	@override
+	@staticmethod
+	def command_name():
+		return "GLF"
+
+class UniqueQueue:
+	def __init__(self, *ids):
+		from collections import deque
+		self.queue = deque()
+		self.visited = set()
+		self.add(*ids)
+
+	def __iter__(self):
+		return self
+
+	def __next__(self):
+		if not self.queue:
+			raise StopIteration
+		return self.queue.popleft()
+
+	def add(self, *ids):
+		for v in ids:
+			if v < 0 or v in self.visited:
+				continue
+			self.visited.add(v)
+			self.queue.append(v)
+
+class QuickKey(str, Enum):
+	none = "."
+	key1 = "1"
+	key2 = "2"
+	key3 = "3"
+	key4 = "4"
+	key5 = "5"
+	key6 = "6"
+	key7 = "7"
+	key8 = "8"
+	key9 = "9"
+	key0 = "0"
+
+class QuickLockFlag(Flag):
+	none = 0
+	item1 = 1 << 9
+	item2 = 1 << 8
+	item3 = 1 << 7
+	item4 = 1 << 6
+	item5 = 1 << 5
+	item6 = 1 << 4
+	item7 = 1 << 3
+	item8 = 1 << 2
+	item9 = 1 << 1
+	item0 = 1 << 0
+
+@dataclass
+class System(ProtocolMessage):
+	id: MemoryId = protocol_field(write=True)
+	type: Literal["CNV"] = protocol_field(read=True)
+	name: str = protocol_field(read=True, write=True)
+	quickKey: QuickKey = protocol_field(read=True, write=True)
+	holdTime: int = protocol_field(read=True, write=True)
+	lockout: bool = protocol_field(read=True, write=True)
+	reserved: Literal[None] = protocol_field(read=True, write=True)
+	delayTime: int = protocol_field(read=True, write=True)
+	dataSkip: bool = protocol_field(read=True, write=True)
+	emergencyAlert: bool = protocol_field(read=True, write=True)
+	revIndex: MemoryId = protocol_field(read=True)
+	fwdIndex: MemoryId = protocol_field(read=True)
+	groupHead: MemoryId = protocol_field(read=True)
+	groupTail: MemoryId = protocol_field(read=True)
+	sequence: int = protocol_field(read=True)
+
+	@override
+	@staticmethod
+	def command_name():
+		return "SIN"
+
+	@classmethod
+	async def get_all(Self):
+		async with serial.ProgramGuard():
+			head = (await serial.send_message(GetHeadSystem())).id
+			if head == -1:
+				return # no systems
+			queue = UniqueQueue(head)
+			for id in queue:
+				system = await serial.send_message(Self(id=id), query=True)
+				queue.add(system.revIndex, system.fwdIndex)
+				yield system
+
+@dataclass
+class GetHeadSystem(ProtocolMessage):
+	id: MemoryId = protocol_field(read=True)
+
+	@override
+	@staticmethod
+	def command_name():
+		return "SIH"
+
+@dataclass
+class CreateSystem(ProtocolMessage):
+	id: MemoryId = protocol_field(read=True)
+	type: Literal["CNV"] = protocol_field(write=True, default="CNV")
+
+	@override
+	@staticmethod
+	def command_name():
+		return "CSY"
+
+@dataclass
+class DeleteSystem(ProtocolMessage):
+	ack: Literal["OK"] = protocol_field(read=True)
+	id: MemoryId = protocol_field(write=True)
+
+	@override
+	@staticmethod
+	def command_name():
+		return "DSY"
+
+@dataclass
+class SystemQuickLockout(ProtocolMessage):
+	quickSystems: Literal["OK"] | QuickLockFlag = protocol_field(read=True, write=True)
+
+	@override
+	@staticmethod
+	def command_name():
+		return "QSL"
+
+@dataclass
+class Group(ProtocolMessage):
+	id: MemoryId = protocol_field(write=True)
+	type: Literal["C", None] = protocol_field(read=True)
+	name: str = protocol_field(read=True, write=True)
+	quickKey: QuickKey = protocol_field(read=True, write=True)
+	lockout: bool = protocol_field(read=True, write=True)
+	revIndex: MemoryId = protocol_field(read=True)
+	fwdIndex: MemoryId = protocol_field(read=True)
+	sysIndex: MemoryId = protocol_field(read=True)
+	chanHead: MemoryId = protocol_field(read=True)
+	chanTail: MemoryId = protocol_field(read=True)
+	sequence: int = protocol_field(read=True)
+
+	@override
+	@staticmethod
+	def command_name():
+		return "GIN"
+
+	@classmethod
+	async def get_all(Self, systemId):
+		async with serial.ProgramGuard():
+			if type(systemId) is System:
+				system = systemId
+			else:
+				system = await serial.send_message(System(id=systemId), query=True)
+			queue = UniqueQueue(system.groupHead, system.groupTail)
+			for id in queue:
+				group = await serial.send_message(Self(id=id), query=True)
+				queue.add(group.revIndex, group.fwdIndex)
+				yield group
+
+@dataclass
+class CreateGroup(ProtocolMessage):
+	systemId: MemoryId = protocol_field(write=True)
+	groupId: MemoryId = protocol_field(read=True)
+
+	@override
+	@staticmethod
+	def command_name():
+		return "AGC"
+
+@dataclass
+class DeleteGroup(ProtocolMessage):
+	ack: Literal["OK"] = protocol_field(read=True)
+	id: MemoryId = protocol_field(write=True)
+
+	@override
+	@staticmethod
+	def command_name():
+		return "DGR"
+
+@dataclass
+class GroupQuickLockout(ProtocolMessage):
+	systemId: MemoryId = protocol_field(write=True)
+	quickGroups: Literal["OK"] | QuickLockFlag = protocol_field(read=True, write=True)
+
+	@override
+	@staticmethod
+	def command_name():
+		return "QGL"
+
+class SquelchTone(int, Enum):
 	none = (0, None)
 	search = (127, None)
 
@@ -370,8 +798,8 @@ class Channel(ProtocolMessage):
 	frequency: float = protocol_field(read=True, write=True)
 	searchStep: SearchStep = protocol_field(read=True, write=True)
 	modulation: Modulation = protocol_field(read=True, write=True)
-	squelch: SquelchMode = protocol_field(read=True, write=True)
-	squelchEnabled: bool = protocol_field(read=True, write=True)
+	squelchTone: SquelchTone = protocol_field(read=True, write=True)
+	squelchToneEnabled: bool = protocol_field(read=True, write=True)
 	lockout: bool = protocol_field(read=True, write=True)
 	priority: bool = protocol_field(read=True, write=True)
 	attenuation: bool = protocol_field(read=True, write=True)
@@ -385,3 +813,36 @@ class Channel(ProtocolMessage):
 	@staticmethod
 	def command_name():
 		return "CIN"
+
+	@classmethod
+	async def get_all(Self, groupId):
+		async with serial.ProgramGuard():
+			if type(groupId) is Group:
+				group = groupId
+			else:
+				group = await serial.send_message(System(id=groupId), query=True)
+			queue = UniqueQueue(group.chanHead, group.chanTail)
+			for id in queue:
+				group = await serial.send_message(Self(id=id), query=True)
+				queue.add(group.revIndex, group.fwdIndex)
+				yield group
+
+@dataclass
+class CreateChannel(ProtocolMessage):
+	groupId: MemoryId = protocol_field(write=True)
+	channelId: MemoryId = protocol_field(read=True)
+
+	@override
+	@staticmethod
+	def command_name():
+		return "ACC"
+
+@dataclass
+class DeleteChannel(ProtocolMessage):
+	ack: Literal["OK"] = protocol_field(read=True)
+	id: MemoryId = protocol_field(write=True)
+
+	@override
+	@staticmethod
+	def command_name():
+		return "DCH"

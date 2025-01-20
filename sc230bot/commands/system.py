@@ -4,7 +4,8 @@ from discord.ext import commands
 from . import logger
 from .. import config, serial, getLogger, UNLOCKED_EMOJI, LOCKED_EMOJI, category
 from ..bot import Sc230Context, CommandError, BadSubcommandError, CommandHandled, StatusGuard, enforce_is_admin, bot
-from ..serial import ProgramGuard, SerialError, SerialGuard, walk_ids
+from ..serial import ProgramGuard, SerialError, SerialGuard
+from ..serial.messages import CreateSystem, DeleteSystem, System
 
 @category("programming")
 @bot.group(invoke_without_command=True, aliases=["systems", "sys", "s"])
@@ -24,17 +25,10 @@ async def list_(ctx: Sc230Context):
 		list systems and their ids
 	"""
 	async with SerialGuard(ctx.message), ProgramGuard():
-		head = int((await serial.send_raw(b"SIH")).split(",")[1])
-		tail = int((await serial.send_raw(b"SIT")).split(",")[1])
-
 		systems = []
-		for id in await walk_ids(head, tail):
-			match (await serial.send_raw(f"SIN,{id}")).split(","):
-				case ["SIN", _, name, _, _, locked, *_]:
-					locked = LOCKED_EMOJI if locked != "0" else UNLOCKED_EMOJI
-					systems.append(f"* {id} - {name} {locked}")
-				case resp:
-					logger.warning(f"weird response for system {id}: {resp!r}")
+		async for sys in System.get_all():
+			locked = sys.lockout and LOCKED_EMOJI or UNLOCKED_EMOJI
+			systems.append(f"* {sys.id} - {sys.name} {locked}")
 		if systems:
 			await ctx.reply("\n".join(systems))
 		else:
@@ -47,13 +41,12 @@ async def add(ctx: Sc230Context, *, name: str = commands.parameter(default="", d
 		add a new system, optionally setting its name
 	"""
 	async with SerialGuard(ctx.message), ProgramGuard():
-		[_, id] = (await serial.send_raw(b"CSY,CNV")).split(",")
-		if id == "-1":
+		system = await serial.send_message(CreateSystem())
+		if system.id == -1:
 			raise CommandError("could not create system")
 		if name:
-			name = serial.sanitize_string(name)
-			await serial.send_raw(f"SIN,{id},{name},,,,,,,")
-		await ctx.reply(f"created new system with id {id}")
+			await serial.send_message(System(id=system.id, name=name), update=True)
+		await ctx.reply(f"created new system with id {system.id}")
 		raise CommandHandled
 
 @system.command(ignore_extra=False, aliases=["del"])
@@ -64,7 +57,7 @@ async def delete(ctx: Sc230Context, *, ids: str = commands.parameter(displayed_n
 	ids = list(int(v) for v in ids.split())
 	async with SerialGuard(ctx.message), ProgramGuard():
 		for id in ids:
-			await serial.send_raw(f"DSY,{id}")
+			await serial.send_message(DeleteSystem(id=id))
 
 @system.command(ignore_extra=False)
 async def name(
@@ -81,9 +74,8 @@ async def name(
 		newName
 			new name to give this system. limit 16 characters
 	"""
-	newName = serial.sanitize_string(newName)
 	async with SerialGuard(ctx.message), ProgramGuard():
-		await serial.send_raw(f"SIN,{id},{newName},,,,,,,")
+		await serial.send_message(System(id=id, name=newName), update=True)
 
 @system.command(ignore_extra=False)
 async def lock(
@@ -100,4 +92,4 @@ async def lock(
 			system will be locked out if true (skipped during scanning)
 	"""
 	async with SerialGuard(ctx.message), ProgramGuard():
-		await serial.send_raw(f"SIN,{id},,,,{locked & 1},,,,")
+		await serial.send_message(System(id=id, lockout=locked), update=True)

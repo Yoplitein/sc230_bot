@@ -3,8 +3,9 @@ from discord.ext import commands
 
 from . import logger
 from .. import config, serial, getLogger, UNLOCKED_EMOJI, LOCKED_EMOJI, category
-from ..serial import ProgramGuard, SerialError, SerialGuard, walk_ids
 from ..bot import Sc230Context, CommandError, BadSubcommandError, CommandHandled, StatusGuard, enforce_is_admin, bot
+from ..serial import ProgramGuard, SerialError, SerialGuard
+from ..serial.messages import Channel, CreateChannel, DeleteChannel, Group
 
 @category("programming")
 @bot.group(invoke_without_command=True, aliases=["channels", "chan", "chans", "c"])
@@ -25,16 +26,10 @@ async def list_(ctx: Sc230Context, groupId: int = commands.parameter(displayed_n
 		list channels in a given group
 	"""
 	async with SerialGuard(ctx.message), ProgramGuard():
-		(_, _, groupName, _, _, _, _, _, head, tail, _) = (await serial.send_raw(f"GIN,{groupId}")).split(",")
-		[head, tail] = map(int, [head, tail])
-
+		group = await serial.send_message(Group(id=groupId), query=True)
 		channels = []
-		for id in await walk_ids(head, tail):
-			match (await serial.send_raw(f"CIN,{id}")).split(","):
-				case ["CIN", name, freq, _, _, _, _, locked, *_]:
-					channels.append(serial.format_channel(id, name, freq, locked))
-				case resp:
-					logger.debug(f"weird response for channel {id}: {resp!r}")
+		async for channel in Channel.get_all(group):
+			channels.append(serial.format_channel(channel.id, channel.name, channel.frequency, channel.lockout))
 		if channels:
 			col1, col2 = [], []
 			try:
@@ -48,7 +43,7 @@ async def list_(ctx: Sc230Context, groupId: int = commands.parameter(displayed_n
 			embed = discord.Embed()
 			embed.add_field(name="", value=col1)
 			embed.add_field(name="", value=col2)
-			await ctx.reply(f"## {groupName}", embed=embed)
+			await ctx.reply(f"## {group.name}", embed=embed)
 		else:
 			await ctx.reply("no channels found")
 
@@ -74,11 +69,10 @@ async def add(
 	frequencies = []
 	for line in frequencySpecs.split("\n"):
 		line = line.split(maxsplit=1)
-		freq = serial.format_frequency(line[0])
+		freq = float(line[0])
 		name = line[1:]
 		if name:
-			name = serial.sanitize_string(name[0])
-			frequencies.append((freq, name))
+			frequencies.append((freq, name[0]))
 		else:
 			frequencies.append(freq)
 	if not frequencies:
@@ -101,26 +95,18 @@ async def add(
 				case _:
 					assert False, "unexpected case"
 
-			if (await serial.send_raw(f"GIN,{groupId}")).split(",", 1)[1] == "ERR":
-				raise CommandError(f"group {groupId} does not exist")
-			[_, id] = (await serial.send_raw(f"ACC,{groupId}")).split(",")
-			if id == "-1":
+			channel = await serial.send_message(CreateChannel(groupId=groupId))
+			if channel.channelId == -1:
 				raise CommandError("could not create channel")
 			try:
-				match (await serial.send_raw(f"CIN,{id},{name},{freq},,,,,,,,")).split(","):
-					case ["CIN", "OK"]:
-						pass
-					case ["CIN", "ERR"]:
-						raise CommandError("failed to update channel", freq=freq)
-				match (await serial.send_raw(f"CIN,{id}")).split(","):
-					case ["CIN", _, setFreq, *_] if setFreq == freq:
-						pass
-					case _:
-						raise CommandError("out of band", freq=freq)
+				await serial.send_message(Channel(id=channel.channelId, name=name, frequency=freq), update=True)
+				channel = await serial.send_message(Channel(id=channel.channelId), query=True)
+				if channel.frequency != freq:
+					raise CommandError("out of band", freq=freq)
 			except CommandError as err:
-				freq = serial.parse_frequency(err.freq)
+				freq = serial.parse_frequency(err.freq, pretty=True)
 				errors.append(f"{freq}: {err.msg}")
-				await serial.send_raw(f"DCH,{id}")
+				await serial.send_message(DeleteChannel(id=channel.id))
 			processedFreqs += 1
 
 		numErrors = len(errors)
@@ -139,7 +125,7 @@ async def delete(ctx: Sc230Context, *, ids: str = commands.parameter(displayed_n
 	ids = list(int(v) for v in ids.split())
 	async with SerialGuard(ctx.message), ProgramGuard():
 		for id in ids:
-			await serial.send_raw(f"DCH,{id}")
+			await serial.send_message(DeleteChannel(id=id))
 
 @channel.command(ignore_extra=False)
 async def name(
@@ -156,9 +142,8 @@ async def name(
 		newName
 			new name to give this channel. limit 16 characters
 	"""
-	newName = serial.sanitize_string(newName)
 	async with SerialGuard(ctx.message), ProgramGuard():
-		await serial.send_raw(f"CIN,{id},{newName},,,,,,,,,")
+		await serial.send_message(Channel(id=id, name=newName), update=True)
 
 @channel.command(ignore_extra=False)
 async def lock(
@@ -170,7 +155,7 @@ async def lock(
 		set a channel's lockout status
 	"""
 	async with SerialGuard(ctx.message), ProgramGuard():
-		await serial.send_raw(f"CIN,{id},,,,,,,{locked & 1},,,")
+		await serial.send_message(Channel(id=id, lockout=locked), update=True)
 
 @channel.command(ignore_extra=False, aliases=["freq"])
 async def frequency(
@@ -181,6 +166,5 @@ async def frequency(
 	"""
 		set a channel's frequency
 	"""
-	freq = serial.format_frequency(freq)
 	async with SerialGuard(ctx.message), ProgramGuard():
-		await serial.send_raw(f"CIN,{id},,{freq},,,,,,,,")
+		await serial.send_message(Channel(id=id, frequency=freq), update=True)

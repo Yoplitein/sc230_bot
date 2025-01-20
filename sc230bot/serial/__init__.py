@@ -1,11 +1,14 @@
 import asyncio
+import itertools
 import time
 from typing import Optional
 
 import discord
 import serial as pyserial
 
-from .. import config, Peekable, getLogger, UNLOCKED_EMOJI, LOCKED_EMOJI
+from .messages import Key, KeyCode, KeyState
+
+from .. import config, getLogger, UNLOCKED_EMOJI, LOCKED_EMOJI
 
 logger = getLogger(__name__)
 
@@ -47,50 +50,26 @@ class SerialGuard:
 		logger.debug(f"serial unlocked, held for {lockDuration:02f} seconds")
 
 	@classmethod
-	def enforce(self):
-		assert self.lock.locked(), "expected serial lock to be locked but it is unlocked"
+	def enforce(Self):
+		assert Self.lock.locked(), "expected serial lock to be locked but it is unlocked"
 		assert serial is not None, "expected serial port to be open but it is `None`"
 
 class ProgramGuard:
 	level = 0
 
 	@classmethod
-	async def __aenter__(self):
-		self.level += 1
-		if self.level > 1:
+	async def __aenter__(Self):
+		Self.level += 1
+		if Self.level > 1:
 			return
-		await send_raw(b"EPG")
-		await send_raw(b"PRG")
+		await send_message(messages.ExitProgramming())
+		await send_message(messages.EnterProgramming())
 
 	@classmethod
-	async def __aexit__(self, *_):
-		self.level -= 1
-		if self.level == 0:
-			await send_raw(b"EPG")
-
-class IdWalker:
-	def __init__(self, seed: int):
-		from collections import deque
-		assert type(seed) is int
-		self.queue = deque([seed])
-		self.visited = set([seed])
-
-	def __iter__(self):
-		return self
-
-	def __next__(self):
-		if not self.queue:
-			raise StopIteration
-		return self.queue.popleft()
-
-	def add(self, revIndex: int, fwdIndex: int):
-		assert type(revIndex) is int
-		assert type(fwdIndex) is int
-		for v in [revIndex, fwdIndex]:
-			if v < 0 or v in self.visited:
-				continue
-			self.visited.add(v)
-			self.queue.append(v)
+	async def __aexit__(Self, *_):
+		Self.level -= 1
+		if Self.level == 0:
+			await send_message(messages.ExitProgramming())
 
 serial: Optional[pyserial.Serial] = None
 def open():
@@ -116,7 +95,7 @@ def close():
 	serial.close()
 	serial = None
 
-def read_line() -> bytes:
+def read_line(*, timeout: float = 5) -> bytes:
 	SerialGuard.enforce()
 	res = bytes()
 	started = time.time()
@@ -124,7 +103,7 @@ def read_line() -> bytes:
 		read = serial.read(1)
 		if len(read) == 0:
 			time.sleep(0.1)
-			if time.time() - started > 5:
+			if time.time() - started > timeout:
 				err = SerialError("timed out trying to read line")
 				logger.error(f"{err.msg} ({res=})")
 				raise err
@@ -135,17 +114,9 @@ def read_line() -> bytes:
 	logger.debug(f"serial read  {res!r}")
 
 	res = res.strip()
-	match res.split(b","):
-		case [b"ERR"]:
-			raise SerialError("command error")
-		case [b"NG"]:
-			raise SerialError("invalid state for command")
-		case [b"FER"]:
-			raise SerialError("framing error")
-		case [b"ORER"]:
-			raise SerialError("overrun error")
-		case _:
-			return res
+	if res == b"ERR":
+		raise SerialError("device received unknown command")
+	return res
 
 def write_line(line: bytes):
 	SerialGuard.enforce()
@@ -157,48 +128,45 @@ def write_line(line: bytes):
 		line = line[written:]
 		if len(line) == 0:
 			break
+	serial.flush()
 
-async def send_raw(line: str | bytes):
+async def send_raw(line: str | bytes, *, timeout: float = 5):
 	def inner():
 		nonlocal line
 		if type(line) is str:
 			line = line.encode("ascii")
 		write_line(line)
-		return read_line().decode("ascii")
+		return read_line(timeout=timeout).decode("ascii")
 	return await asyncio.to_thread(inner)
 
-async def send_key(key: int | str | bytes, mode = "P"):
-	if type(key) in [str, bytes]:
-		key = ord(key)
-	assert key in allowedKeys, f"{chr(key)!r} is not a valid key"
-	await send_raw(f"KEY,{chr(key)},{mode}")
+async def send_key(keycode: KeyCode, state: KeyState = KeyState.press):
+	assert type(keycode) is KeyCode
+	await send_message(Key(keycode=keycode, state=state))
 
-async def send_keys(keys: str | bytes):
-	if type(keys) is str:
-		keys = keys.encode("ascii")
+async def send_keys(keys: str):
+	assert type(keys) is str
 
 	parsed = []
 	try:
-		it = Peekable(keys)
+		it = iter(keys)
 		while True:
-			key = bytes([it.next()])
+			keycode = KeyCode(next(it))
 
 			holdCount = 0
-			peekIndex = 0
-			while True:
-				match it.peek(peekIndex):
-					case c if c and chr(c) == "+":
-						holdCount += 1
-						peekIndex += 1
-					case _:
-						break
-			if holdCount > 0:
-				parsed.append((key, holdCount))
-				for _ in range(holdCount):
-					it.next()
-					pass
+			it, peek = itertools.tee(it)
+			try:
+				while next(peek) == "+":
+					holdCount += 1
+			except StopIteration:
+				pass
+
+			if holdCount == 0:
+				parsed.append(keycode)
 			else:
-				parsed.append(key)
+				parsed.append((keycode, holdCount))
+				for _ in range(holdCount):
+					next(it)
+					pass
 	except StopIteration:
 		pass
 
@@ -206,51 +174,58 @@ async def send_keys(keys: str | bytes):
 	try:
 		for keyspec in parsed:
 			match keyspec:
-				case (char, count):
-					curCount = pressed.get(char, 0)
+				case (keycode, holdCount):
+					curCount = pressed.get(keycode, 0)
 					if curCount == 0:
-						await send_key(char, "H")
-					pressed[char] = curCount + count
-				case char:
-					await send_key(char)
-					for key, count in pressed.items():
-						if count == 1:
-							await send_key(key, "R")
-						if count > 0:
-							pressed[key] = count - 1
+						await send_key(keycode, KeyState.hold)
+					pressed[keycode] = curCount + holdCount
+				case keycode:
+					await send_key(keycode)
+					for keycode, holdCount in pressed.items():
+						if holdCount == 1:
+							await send_key(keycode, KeyState.release)
+						if holdCount > 0:
+							pressed[keycode] = holdCount - 1
 	except:
-		for key in pressed:
+		for keycode in pressed:
 			try:
-				await send_key(key, "R")
+				await send_key(keycode, KeyState.release)
 			except:
 				pass
 		raise
 
-async def walk_ids(head: int, tail: int) -> list[int]:
-	assert SerialGuard.lock.locked(), "trying to walk_ids without serial lock held"
-	assert ProgramGuard.level > 0, "trying to walk_ids outside of program mode"
+async def send_message[Msg](request: Msg, *, query = False, update = False, timeout: float = 5) -> Msg:
+	Msg = type(request)
+	response = await send_raw(request.write(query=query), timeout=timeout)
 
-	if head == -1:
-		return []
+	[cmd, rest] = response.split(",", 1)
+	if cmd != Msg.command_name():
+		raise SerialError(f"exchanging message {Msg.command_name()!r} (`{Msg.__name__}`) but read back different type {cmd!r}")
+	match rest:
+		case "ERR":
+			raise SerialError(f"encounterd format/value error while exchanging message {Msg.command_name()!r} (`{Msg.__name__}`)")
+		case "NG":
+			raise SerialError(f"{Msg.command_name()!r} (`{Msg.__name__}`) message is invalid in current mode")
+		case "FER":
+			raise SerialError(f"encounterd framing error while exchanging message {Msg.command_name()!r} (`{Msg.__name__}`)")
+		case "ORER":
+			raise SerialError(f"encounterd overrun error while exchanging message {Msg.command_name()!r} (`{Msg.__name__}`)")
 
-	ids = [head]
-	while tail != "-1" and head != tail:
-		match (await send_raw(f"FWD,{head}")).split(","):
-			case ["FWD", "-1"]:
-				assert False, "forward id is -1???"
-			case ["FWD", next]:
-				head = int(next)
-		ids.append(head)
-	return ids
+	response = Msg.read(response, update=update)
+	if query and hasattr(Msg, "id"):
+		assert request.id is not None
+		response.id = request.id
+	return response
 
 def format_channel(id, name, freq, locked = None):
-	freq = parse_frequency(freq)
+	if type(freq) is not str or freq[-3:].lower() != "mhz":
+		freq = parse_frequency(format_frequency(freq), pretty=True)
 	if name.endswith("MHz"):
 		name = ""
 	else:
 		name = f" ({name})"
 	if locked != None:
-		locked = LOCKED_EMOJI if locked != "0" else UNLOCKED_EMOJI
+		locked = LOCKED_EMOJI if locked else UNLOCKED_EMOJI
 		locked = " " + locked
 	return f"{id} - {freq}{name}{locked}"
 
@@ -264,10 +239,15 @@ def format_frequency(freq: str | float) -> str:
 	freq = int(freq * 1e4)
 	return f"{freq:08}"
 
-def parse_frequency(freq: str) -> str:
+def parse_frequency(freq: str, *, pretty = False) -> float:
 	"Parse frequency read from protocol"
-	freq = int(freq) / 1e4
-	return f"{freq}MHz"
+	freq = int(freq)
+	if freq < 0:
+		return -1
+	freq /= 1e4
+	if pretty:
+		return f"{freq}MHz"
+	return freq
 
 def sanitize_string(str: str) -> str:
 	return str.translate({

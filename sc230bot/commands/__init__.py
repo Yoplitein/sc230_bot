@@ -1,12 +1,15 @@
 from dataclasses import dataclass
 from enum import Enum, Flag
 import itertools
+from typing import Optional
 
 import discord
 from discord.ext import commands
 
+from ..serial.messages import AddGlobalLockout, Channel, ExitProgramming, FactoryReset, GetGlobalLockouts, Group, GroupQuickLockout, KeyCode, MemoryBlocks, MemoryUsage, Modulation, QuickLockFlag, QuickSearch, RemoveGlobalLockout, SearchStep, System, SystemQuickLockout
+
 from .. import config, serial, getLogger, UNLOCKED_EMOJI, LOCKED_EMOJI, category
-from ..serial import ProgramGuard, SerialError, SerialGuard, walk_ids
+from ..serial import ProgramGuard, SerialError, SerialGuard
 from ..bot import Sc230Context, CommandError, CommandHandled, StatusGuard, enforce_is_admin, bot
 
 logger = getLogger(__name__)
@@ -109,7 +112,6 @@ def parse_status(line: str) -> Status:
 	mute = read_to_comma()
 	read_to_comma() # battery status
 	weatherAlert = read_to_comma()
-	logger.debug(f"{line1=} {line2=} {icon1Str=} {icon2Str=} {squelch=} {mute=} {weatherAlert=}")
 
 	line1 = line1.strip()
 	line2 = line2.strip()
@@ -148,6 +150,18 @@ async def status(_, ctx: Sc230Context):
 		raise CommandHandled
 
 @category("inspection")
+@bot.command(ignore_extra=False, aliases=["mem"])
+async def memory(_, ctx: Sc230Context):
+	"""
+		print memory usage stats
+	"""
+	async with SerialGuard(ctx.message), ProgramGuard():
+		memory = await serial.send_message(MemoryUsage())
+		blocks = await serial.send_message(MemoryBlocks())
+		await ctx.reply(f"{memory.percentage}% used, {blocks.free}/3349 blocks free")
+		raise CommandHandled
+
+@category("inspection")
 @bot.command(ignore_extra=False)
 async def tree(_, ctx: Sc230Context):
 	"""
@@ -165,46 +179,24 @@ async def tree(_, ctx: Sc230Context):
 
 	systems = []
 	async with SerialGuard(ctx.message, typing=True), ProgramGuard(), StatusGuard(ctx, format_status, interval=2.5):
-		systemHead = int((await serial.send_raw(b"SIH")).split(",")[1])
-		systemWalker = serial.IdWalker(systemHead)
-		for systemId in systemWalker:
+		async for system in System.get_all():
 			doneSystems += 1
-
-			(_, _, systemName, _, _, locked, _, _, _, _, rev, fwd, groupHead, groupTail, _) = (await serial.send_raw(f"SIN,{systemId}")).split(",")
-			locked = locked != "0"
-			[groupHead, groupTail] = map(int, [groupHead, groupTail])
-			rev, fwd = int(rev), int(fwd)
-			systemWalker.add(rev, fwd)
-
-			locked = LOCKED_EMOJI if locked else UNLOCKED_EMOJI
-			embed = discord.Embed(title=f"{systemId} - {systemName} {locked}")
+			locked = LOCKED_EMOJI if system.lockout else UNLOCKED_EMOJI
+			embed = discord.Embed(title=f"{system.id} - {system.name} {locked}")
 			systems.append(embed)
 
 			noGroups = True
-			groupWalker = serial.IdWalker(groupHead)
-			for groupId in groupWalker:
+			async for group in Group.get_all(system):
 				noGroups = False
 				doneGroups += 1
-
-				(_, _, groupName, _, locked, rev, fwd, _, chanHead, chanTail, _) = (await serial.send_raw(f"GIN,{groupId}")).split(",")
-				locked = locked != "0"
-				[chanHead, chanTail] = map(int, [chanHead, chanTail])
-				rev, fwd = int(rev), int(fwd)
-				groupWalker.add(rev, fwd)
-
-				locked = LOCKED_EMOJI if locked else UNLOCKED_EMOJI
-				embed.add_field(name=f"{groupId} - {groupName} {locked}", value="", inline=False)
+				locked = LOCKED_EMOJI if group.lockout else UNLOCKED_EMOJI
+				embed.add_field(name=f"{group.id} - {group.name} {locked}", value="", inline=False)
 
 				channels = []
-				channelWalker = serial.IdWalker(chanHead)
-				for channelId in channelWalker:
+				async for channel in Channel.get_all(group):
 					doneChannels += 1
-
-					(_, name, freq, _, _, _, _, locked, _, _, _, rev, fwd, _, _) = (await serial.send_raw(f"CIN,{channelId}")).split(",")
-					rev, fwd = int(rev), int(fwd)
-					channelWalker.add(rev, fwd)
-					formatted = serial.format_channel(channelId, name, freq, locked)
-					channels.append(f"{formatted}")
+					formatted = serial.format_channel(channel.id, channel.name, channel.frequency, channel.lockout)
+					channels.append(formatted)
 				if not channels:
 					embed.add_field(name="", value="no channels")
 					continue
@@ -282,13 +274,13 @@ async def search(_, ctx: Sc230Context, *, option: SearchOption):
 		scan preprogrammed frequency ranges
 	"""
 	async with SerialGuard(ctx.message):
-		await serial.send_raw(b"EPG")
+		await serial.send_message(ExitProgramming())
 		if option == "weather":
-			await serial.send_keys(b"M>>>>>^")
+			await serial.send_keys("M>>>>>^")
 		else:
-			await serial.send_keys(b"M>>^^")
+			await serial.send_keys("M>>^^")
 			await serial.send_keys(option.keys)
-		await serial.send_key(ord('^'))
+		await serial.send_key(KeyCode.enter)
 search.help += f"\n\noption must be one of:" + \
 	"\n  ".join(itertools.chain([""], (
 		f"{o.value}{o.description and " - " or ""}{o.description or ""}" for o in SearchOption
@@ -300,13 +292,18 @@ async def freq(_, ctx: Sc230Context, *, frequency: float):
 	"""
 		tune in to a specific frequency (to nearest 5kHz)
 	"""
-	frequency = serial.format_frequency(frequency)
 	async with SerialGuard(ctx.message):
-		match (await serial.send_raw(f"QSH,{frequency},0,AUTO,0,2,0,1,0,0")).split(","):
-			case ["QSH", "OK"]:
-				pass
-			case ["QSH", "ERR" | "NG"]:
-				raise CommandError("couldn't tune in, is the scanner busy?")
+		await serial.send_message(QuickSearch(
+			frequency=frequency,
+			step=SearchStep.auto,
+			modulation=Modulation.auto,
+			attenuation=False,
+			delay=2,
+			squelchCodeSearch=False,
+			dataSkip=False,
+			pagerSkip=False,
+			repeaterFind=True,
+		))
 
 @category("locking")
 @bot.command(ignore_extra=False)
@@ -319,18 +316,17 @@ async def lockout(_, ctx: Sc230Context, *, frequencies: str):
 		frequencies
 			a list of frequencies separated by whitespace
 	"""
-	frequencies = list(map(serial.format_frequency, frequencies.split()))
+	frequencies = frequencies.split()
 	async with SerialGuard(ctx.message), ProgramGuard():
 		locked = 0
 		errs = 0
 		for freq in frequencies:
-			match (await serial.send_raw(f"LOF,{freq}")).split(","):
-				case ["LOF", "OK"]:
-					locked += 1
-				case ["LOF", "ERR"]:
-					errs += 1
-				case resp:
-					raise SerialError(f"unexpected response {resp=}")
+			freq = float(freq)
+			try:
+				await serial.send_message(AddGlobalLockout(frequency=freq))
+				locked += 1
+			except SerialError:
+				errs += 1
 		if errs > 0:
 			errs = f", {errs} out of band"
 		else:
@@ -344,28 +340,17 @@ async def unlockall(_, ctx: Sc230Context):
 		unlock all locked out systems/groups/channels
 	"""
 	async with SerialGuard(ctx.message, typing=True), ProgramGuard():
-		while True:
-			match (await serial.send_raw(b"GLF")).split(","):
-				case ["GLF", "-1"]:
-					break
-				case ["GLF", freq]:
-					await serial.send_raw(f"ULF,{freq}")
+		while (freq := (await serial.send_message(GetGlobalLockouts())).frequency) != -1:
+			await serial.send_message(RemoveGlobalLockout(frequency=freq))
 
-		await serial.send_raw(f"QSL,0000000000")
-
-		systemHead = int((await serial.send_raw(b"SIH")).split(",")[1])
-		systemTail = int((await serial.send_raw(b"SIT")).split(",")[1])
-		for systemId in await walk_ids(systemHead, systemTail):
-			await serial.send_raw(f"QGL,{systemId},0000000000")
-			await serial.send_raw(f"SIN,{systemId},,,,0,,,,")
-			(_, _, systemName, _, _, _, _, _, _, _, _, _, groupHead, groupTail, _) = (await serial.send_raw(f"SIN,{systemId}")).split(",")
-			[groupHead, groupTail] = map(int, [groupHead, groupTail])
-			for groupId in await walk_ids(groupHead, groupTail):
-				await serial.send_raw(f"GIN,{groupId},,,0")
-				(_, _, groupName, _, _, _, _, _, chanHead, chanTail, _) = (await serial.send_raw(f"GIN,{groupId}")).split(",")
-				[chanHead, chanTail] = map(int, [chanHead, chanTail])
-				for channelId in await walk_ids(chanHead, chanTail):
-					await serial.send_raw(f"CIN,{channelId},,,,,,,0,,,")
+		await serial.send_message(SystemQuickLockout(quickSystems=QuickLockFlag.none))
+		async for system in System.get_all():
+			await serial.send_message(GroupQuickLockout(systemId=system.id, quickGroups=QuickLockFlag.none))
+			await serial.send_message(System(id=system.id, lockout=False), update=True)
+			async for group in Group.get_all(system):
+				await serial.send_message(Group(id=group.id, lockout=False), update=True)
+				async for channel in Channel.get_all(group):
+					await serial.send_message(Channel(id=channel.id, lockout=False), update=True)
 
 @bot.command(ignore_extra=False)
 async def factoryreset(ctx: Sc230Context):
@@ -374,7 +359,7 @@ async def factoryreset(ctx: Sc230Context):
 	"""
 	enforce_is_admin(ctx.author)
 	async with SerialGuard(ctx.message, typing=True), ProgramGuard():
-		await serial.send_raw(b"CLR")
+		await serial.send_message(FactoryReset(), timeout=30)
 
 @bot.command(ignore_extra=False)
 async def sweep(ctx: Sc230Context, *, all: str = commands.parameter(default=False, displayed_default="false")):
