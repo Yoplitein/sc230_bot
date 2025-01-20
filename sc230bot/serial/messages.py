@@ -799,7 +799,7 @@ class Channel(ProtocolMessage):
 	searchStep: SearchStep = protocol_field(read=True, write=True)
 	modulation: Modulation = protocol_field(read=True, write=True)
 	squelchTone: SquelchTone = protocol_field(read=True, write=True)
-	squelchToneEnabled: bool = protocol_field(read=True, write=True)
+	squelchToneLockout: bool = protocol_field(read=True, write=True)
 	lockout: bool = protocol_field(read=True, write=True)
 	priority: bool = protocol_field(read=True, write=True)
 	attenuation: bool = protocol_field(read=True, write=True)

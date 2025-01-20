@@ -5,7 +5,7 @@ from . import logger
 from .. import config, serial, getLogger, UNLOCKED_EMOJI, LOCKED_EMOJI, category
 from ..bot import Sc230Context, CommandError, BadSubcommandError, CommandHandled, StatusGuard, enforce_is_admin, bot
 from ..serial import ProgramGuard, SerialError, SerialGuard
-from ..serial.messages import Channel, CreateChannel, DeleteChannel, Group
+from ..serial.messages import Channel, CreateChannel, DeleteChannel, Group, Modulation, SearchStep, SquelchTone
 
 @category("programming")
 @bot.group(invoke_without_command=True, aliases=["channels", "chan", "chans", "c"])
@@ -99,7 +99,19 @@ async def add(
 			if channel.channelId == -1:
 				raise CommandError("could not create channel")
 			try:
-				await serial.send_message(Channel(id=channel.channelId, name=name, frequency=freq), update=True)
+				await serial.send_message(Channel(
+					id=channel.channelId,
+					name=name,
+					frequency=freq,
+					searchStep=SearchStep("5k"),
+					modulation=Modulation.auto,
+					squelchTone=SquelchTone.search,
+					squelchToneLockout=False,
+					lockout=False,
+					priority=False,
+					attenuation=False,
+					alert=False,
+				), update=True)
 				channel = await serial.send_message(Channel(id=channel.channelId), query=True)
 				if channel.frequency != freq:
 					raise CommandError("out of band", freq=freq)

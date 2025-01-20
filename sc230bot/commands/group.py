@@ -5,7 +5,7 @@ from . import logger
 from .. import config, serial, getLogger, UNLOCKED_EMOJI, LOCKED_EMOJI, category
 from ..bot import Sc230Context, CommandError, BadSubcommandError, CommandHandled, StatusGuard, enforce_is_admin, bot
 from ..serial import ProgramGuard, SerialError, SerialGuard
-from ..serial.messages import CreateGroup, DeleteGroup, Group, System
+from ..serial.messages import CreateGroup, DeleteGroup, Group, QuickKey, System
 
 @category("programming")
 @bot.group(invoke_without_command=True, aliases=["groups", "g"])
@@ -54,7 +54,12 @@ async def add(
 		if group.groupId == -1:
 			raise CommandError("could not create group")
 		if name:
-			await serial.send_message(Group(id=group.groupId, name=name), update=True)
+			await serial.send_message(Group(
+				id=group.groupId,
+				name=name,
+				quickKey=QuickKey.none,
+				lockout=False,
+			), update=True)
 		await ctx.reply(f"created new group with id {group.groupId}")
 		raise CommandHandled
 

@@ -5,7 +5,7 @@ from . import logger
 from .. import config, serial, getLogger, UNLOCKED_EMOJI, LOCKED_EMOJI, category
 from ..bot import Sc230Context, CommandError, BadSubcommandError, CommandHandled, StatusGuard, enforce_is_admin, bot
 from ..serial import ProgramGuard, SerialError, SerialGuard
-from ..serial.messages import CreateSystem, DeleteSystem, System
+from ..serial.messages import CreateSystem, DeleteSystem, QuickKey, System
 
 @category("programming")
 @bot.group(invoke_without_command=True, aliases=["systems", "sys", "s"])
@@ -45,7 +45,16 @@ async def add(ctx: Sc230Context, *, name: str = commands.parameter(default="", d
 		if system.id == -1:
 			raise CommandError("could not create system")
 		if name:
-			await serial.send_message(System(id=system.id, name=name), update=True)
+			await serial.send_message(System(
+				id=system.id,
+				name=name,
+				quickKey=QuickKey.none,
+				holdTime=0,
+				lockout=False,
+				delayTime=2,
+				dataSkip=False,
+				emergencyAlert=False,
+			), update=True)
 		await ctx.reply(f"created new system with id {system.id}")
 		raise CommandHandled
 
