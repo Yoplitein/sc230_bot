@@ -204,6 +204,17 @@ async def on_ready():
 async def on_command_completion(ctx: Sc230Context):
 	await ctx.message.add_reaction(COMMAND_HANDLED_EMOJI)
 
+def format_exception(err: BaseException, msgTemplate = ":boom::boom::boom: unexpected **`{typeName}`**: {message} :boom::boom::boom:{notes}{cause}"):
+	cause = ""
+	if err.__cause__:
+		cause = "\n" + format_exception(err.__cause__, "*caused by* **`{typeName}`**: {message}{notes}{cause}")
+	notes = ""
+	if hasattr(err, "__notes__"):
+		notes = "\n" + "\n".join(f"**note**: {n}" for n in err.__notes__)
+	typeName = type(err).__name__
+	message = str(err).strip(".")
+	return msgTemplate.format(**locals())
+
 @bot.event
 async def on_command_error(ctx: Sc230Context, err: BaseException):
 	def usage():
@@ -216,26 +227,24 @@ async def on_command_error(ctx: Sc230Context, err: BaseException):
 			ctx.view.index = 0
 			ctx.view.skip_string(ctx.prefix)
 			cmdName = ctx.view.get_word()
-			await ctx.reply(f"Command `{cmdName}` does not exist")
+			await ctx.reply(f":boom: command `{cmdName}` does not exist :boom:")
 		case commands.MissingRequiredArgument():
-			await ctx.reply(f"Missing required argument: {err.param.displayed_name or err.param.name}{usage()}")
+			await ctx.reply(f":boom: missing required argument: {err.param.displayed_name or err.param.name} :boom:{usage()}")
 		case commands.TooManyArguments():
-			await ctx.reply(f"Too many arguments{usage()}")
+			await ctx.reply(f":boom: too many arguments :boom:{usage()}")
 		case commands.BadArgument():
-			cause = ""
-			if err.__cause__ is not None:
-				cause = f" caused by `{type(err.__cause__).__name__}`: {str(err.__cause__)}"
-			await ctx.reply(f"{err}{cause}{usage()}")
+			await ctx.reply(f"{format_exception(err, ":boom: {message} :boom:{notes}{cause}")}{usage()}")
 		case commands.CheckFailure():
 			logger.exception("check failure", exc_info=err)
-			await ctx.reply(str(err))
+			await ctx.reply(f":boom: {err} :boom:")
 		case commands.CommandInvokeError():
 			err = err.original
 			match err:
 				case CommandError():
 					await ctx.reply(err.msg)
 				case SerialError():
-					await ctx.reply(f":boom: serial error: {err.msg} :boom:")
+					logger.exception("serial error", exc_info=err)
+					await ctx.reply(format_exception(err, ":boom: **`{typeName}`**: {message} :boom:{notes}{cause}"))
 				case CommandHandled():
 					return
 				case RestartProcess():
@@ -253,22 +262,16 @@ async def on_command_error(ctx: Sc230Context, err: BaseException):
 					subcommands = ["/".join(names) for names in subcommands]
 					subcommands.sort()
 					subcommands = "\n".join(f"* {name}" for name in subcommands)
-					await ctx.reply(f"{err.msg}, expected one of:\n```\n{subcommands}\n```")
+					await ctx.reply(f":boom: {err.msg} :boom:\nexpected one of:\n```\n{subcommands}\n```")
 				case _:
 					logger.exception("unhandled command invoke error", exc_info=err)
-					cause = ""
-					if err.__cause__ is not None:
-						cause = f" caused by `{type(err.__cause__).__name__}`: {str(err.__cause__)}"
-					await ctx.reply(f":boom: unexpected `{type(err).__name__}`{cause} :boom:")
+					await ctx.reply(format_exception(err))
 		case commands.CommandError():
 			logger.exception("unhandled command error", exc_info=err)
-			cause = ""
-			if err.__cause__ is not None:
-				cause = f" caused by `{type(err.__cause__).__name__}`: {str(err.__cause__)}"
-			await ctx.reply(f":boom: unexpected `{type(err).__name__}`{cause} :boom:")
+			await ctx.reply(format_exception(err))
 		case _:
 			logger.exception("very unhandled command error", exc_info=err)
-			await ctx.reply(f":boom: (very) unexpected `{type(err).__name__}` :boom:")
+			await ctx.reply(format_exception(err))
 	await ctx.message.add_reaction(COMMAND_FAILED_EMOJI)
 
 @bot.event
