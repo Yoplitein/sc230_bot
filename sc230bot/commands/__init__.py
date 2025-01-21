@@ -392,6 +392,8 @@ async def sweep(ctx: Sc230Context, *, all: str = commands.parameter(default=Fals
 			return False
 		if all:
 			return True
+		if msg.attachments:
+			return False
 		return (
 			msg.author.id == ctx.bot.user.id or
 			any(react.me for react in msg.reactions) or
